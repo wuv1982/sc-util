@@ -9,7 +9,7 @@ import sc.models.Auth
 import sc.models.Auth.tokenFmt
 import sc.models.Token
 
-class AuthActionHelper[T](val appendProfile: Auth => T)(implicit exec: ExecutionContext) extends ActionHelper {
+class AuthActionHelper[T](val appendProfile: Auth => T = {auth:Auth => auth})(implicit exec: ExecutionContext) extends ActionHelper {
 	override def sessionAction = new SessionAction with Anonymousable with Cookieable {
 
 		override def anonymousUid: Option[(UserSession, AnonymousUserCookie)] = {

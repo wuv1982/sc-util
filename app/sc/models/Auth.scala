@@ -4,8 +4,9 @@ import scala.Left
 import scala.Right
 import scala.concurrent.ExecutionContext
 import scala.concurrent.Future
-
+import play.api.Logger
 import play.api.libs.json.Format
+import play.api.libs.json.JsError
 import play.api.libs.json.JsValue
 import play.api.libs.json.Json
 import play.api.libs.json.Json.toJsFieldJsValueWrapper
@@ -20,7 +21,7 @@ import sc.forms.SignInForm
 import sc.forms.SignUpForm
 import sc.util.db.DBHelper
 import sc.util.fmt.Short.M
-import sc.util.http.AuthActionHelper
+import sc.util.http.ActionHelper
 import sc.util.http.SessionAction
 import sc.util.http.UserCookie
 import sc.util.http.UserSession
@@ -28,6 +29,7 @@ import sc.ma.Json._
 import sc.util.mail.EmailProvider
 import sc.util.mail.EmailTemplate
 import sc.util.security.SecurityUtil
+import sc.util.http.AuthActionHelper
 
 case class Auth(
 	_id: Oid,
@@ -103,15 +105,19 @@ object Auth {
 
 		AuthDB.query(AuthDB.auth)(selector, $()).map {
 			_.flatMap { rs =>
-				Auth.authFmt.reads(rs.head).asOpt.map { auth =>
-					Cache.set(auth.uid, auth)
-					auth
-				}
+				Auth.authFmt.reads(rs.head).fold(
+					invalid => {
+						Logger.warn(JsError.toFlatJson(invalid).toString)
+						None
+					}, auth => {
+						Cache.set(auth.uid, auth)
+						Some(auth)
+					})
 			}
 		}
 	}
 
-	def sighUp[K, T <: AuthActionHelper[K]](actionHelper: T)(implicit exec: ExecutionContext): Action[JsValue] = {
+	def sighUp(actionHelper: ActionHelper)(implicit exec: ExecutionContext): Action[JsValue] = {
 		actionHelper.asyncJson[SignUpForm](signUpForm => request => {
 			find(Json.toJson(signUpForm)).flatMap {
 				case None => {
@@ -144,15 +150,15 @@ object Auth {
 		})
 	}
 
-	def signIn(actionHelper: AuthActionHelper[_])(implicit exec: ExecutionContext): Action[JsValue] = {
+	def signIn(actionHelper: ActionHelper)(implicit exec: ExecutionContext): Action[JsValue] = {
 		actionHelper.asyncJson[SignInForm](signInForm => request => {
 			val selector = $(
 				"uid" -> signInForm.uid,
 				"password" -> SecurityUtil.sha(signInForm.password),
-				"available" -> true)
+				"avaliable" -> true)
 			find(selector).map {
 				case Some(user) => Right(Json.toJson(user))
-				case None => Left(M("e.user.deny"))
+				case None => Left(M("e.user.notfound"))
 			}
 		}, signInForm => {
 			case (jsAuth, response) => {
@@ -162,7 +168,7 @@ object Auth {
 		})
 	}
 
-	def signOut(actionHelper: AuthActionHelper[_])(implicit exec: ExecutionContext): Action[AnyContent] = {
+	def signOut(actionHelper: ActionHelper)(implicit exec: ExecutionContext): Action[AnyContent] = {
 		actionHelper.asyncSessionAny(userSession => request => {
 			Future.successful {
 				Right($("msg" -> M("i.user.signout")))
@@ -174,7 +180,7 @@ object Auth {
 		})
 	}
 
-	def verify(actionHelper: AuthActionHelper[_])(implicit exec: ExecutionContext): Action[AnyContent] = {
+	def verify(actionHelper: ActionHelper)(implicit exec: ExecutionContext): Action[AnyContent] = {
 		actionHelper.asyncAny { request =>
 			request.getQueryString("tokenId").map { tokenId =>
 				find($("token.tokenId" -> tokenId)).flatMap {
@@ -194,6 +200,6 @@ object Auth {
 }
 
 object AuthDB extends DBHelper with Controller with MongoController {
-	lazy val auth = db.collection[JSONCollection]("auth")
+	lazy val auth = db.collection[JSONCollection]("userAuth")
 	lazy val hisAuth = db.collection[JSONCollection]("hisAuth")
 }

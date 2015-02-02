@@ -17,24 +17,6 @@ trait ActionHelper {
 
 	def sessionAction: SessionAction
 
-	//	def async[T](bodyParser: BodyParser[T])(
-	//		f: Request[T] => Future[Either[String, JsValue]],
-	//		r: JsValue => Result = { rs => Ok(rs) }): Action[T] = {
-	//
-	//		Action.async(bodyParser) { request =>
-	//			invokeRequest(f, r)(request)
-	//		}
-	//	}
-	//
-	//	def asyncSession[T](bodyParser: BodyParser[T])(
-	//		f: UserSession => Request[T] => Future[Either[String, JsValue]],
-	//		r: JsValue => Result = { rs => Ok(rs) }): Action[T] = {
-	//
-	//		sessionAction.async(bodyParser) { sessionRequest =>
-	//			invokeRequest(f(sessionRequest.userSession), r)(sessionRequest.request)
-	//		}
-	//	}
-
 	def asyncJson[T](
 		f: T => Request[JsValue] => Future[Either[String, JsValue]],
 		r: T => Tuple2[JsValue, Result] => Result = { form: T => rs: Tuple2[JsValue, Result] => rs._2 })(implicit validator: Format[T]): Action[JsValue] = {
