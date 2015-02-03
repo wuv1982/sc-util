@@ -9,10 +9,17 @@ import play.api.libs.json.Format
 import play.api.libs.json.JsError
 import play.api.libs.json.JsValue
 import play.api.libs.json.Json
+import play.api.libs.json._
+import play.api.libs.json.Reads._
+import play.api.libs.functional.syntax._
+import play.api.libs.json.Json._
+import play.api.libs.functional.syntax._
 import play.api.libs.json.Json.toJsFieldJsValueWrapper
 import play.api.mvc.Action
 import play.api.mvc.AnyContent
 import play.api.mvc.Controller
+import play.api.mvc.Result
+import play.api.mvc.Results.Ok
 import play.api.cache.Cache
 import play.api.Application
 import play.modules.reactivemongo.MongoController
@@ -20,7 +27,7 @@ import play.modules.reactivemongo.json.collection.JSONCollection
 import sc.forms.SignInForm
 import sc.forms.SignUpForm
 import sc.util.db.DBHelper
-import sc.util.fmt.Short.M
+import sc.util.fmt.MessageShorter.M
 import sc.util.http.ActionHelper
 import sc.util.http.SessionAction
 import sc.util.http.UserCookie
@@ -32,13 +39,13 @@ import sc.util.security.SecurityUtil
 import sc.util.http.AuthActionHelper
 
 case class Auth(
-	_id: Oid,
-	uid: String,
-	email: Option[String],
-	password: String,
-	token: Token,
-	avaliable: Boolean,
-	role: String) extends Model[Auth] {
+		_id: Oid,
+		uid: String,
+		email: Option[String],
+		password: String,
+		token: Token,
+		avaliable: Boolean,
+		role: String) extends Model[Auth] {
 
 	override def collection = AuthDB.auth
 
@@ -59,11 +66,11 @@ case class Token(
 	expireDate: Long = System.currentTimeMillis() + Auth.DATE_EXPIRE_DURATION)
 
 case class HisAuth(
-	_id: Oid = Oid.newOid,
-	timestamp: Long = System.currentTimeMillis(),
-	authId: Oid,
-	uid: String,
-	email: Option[String]) extends Model[HisAuth] {
+		_id: Oid = Oid.newOid,
+		timestamp: Long = System.currentTimeMillis(),
+		authId: Oid,
+		uid: String,
+		email: Option[String]) extends Model[HisAuth] {
 
 	override def collection = AuthDB.hisAuth
 }
@@ -94,30 +101,30 @@ object Auth {
 		anonymous
 	}
 
-	def getCachedAuth(uid: String)(implicit exec: ExecutionContext, app: Application): Future[Option[Auth]] = {
+	def find(uid: String)(implicit exec: ExecutionContext, app: Application): Future[Option[Auth]] = {
 		Cache.getAs[Auth](uid)
 			.map(auth => Future.successful(Some(auth)))
-			.getOrElse(find($("uid" -> uid)))
+			.getOrElse(find($("uid" -> uid)).map {
+				_.flatMap { auth =>
+					Auth.authFmt.reads(auth).fold(
+						invalid => {
+							Logger.warn(JsError.toFlatJson(invalid).toString)
+							None
+						}, auth => {
+							Cache.set(auth.uid, auth)
+							Some(auth)
+						})
+				}
+			})
 	}
 
-	def find(selector: JsValue)(implicit exec: ExecutionContext): Future[Option[Auth]] = {
-		import play.api.Play.current
-
-		AuthDB.query(AuthDB.auth)(selector, $()).map {
-			_.flatMap { rs =>
-				Auth.authFmt.reads(rs.head).fold(
-					invalid => {
-						Logger.warn(JsError.toFlatJson(invalid).toString)
-						None
-					}, auth => {
-						Cache.set(auth.uid, auth)
-						Some(auth)
-					})
-			}
+	def find(selector: JsValue, projection: JsValue = $())(implicit exec: ExecutionContext, app: Application): Future[Option[JsValue]] = {
+		AuthDB.query(AuthDB.auth)(selector, projection).map {
+			_.flatMap { rs => rs.headOption }
 		}
 	}
 
-	def sighUp(actionHelper: ActionHelper)(implicit exec: ExecutionContext): Action[JsValue] = {
+	def sighUp(actionHelper: ActionHelper)(implicit exec: ExecutionContext, app: Application): Action[JsValue] = {
 		actionHelper.asyncJson[SignUpForm](signUpForm => request => {
 			find(Json.toJson(signUpForm)).flatMap {
 				case None => {
@@ -150,48 +157,65 @@ object Auth {
 		})
 	}
 
-	def signIn(actionHelper: ActionHelper)(implicit exec: ExecutionContext): Action[JsValue] = {
+	def signIn(actionHelper: ActionHelper)(implicit exec: ExecutionContext, app: Application): Action[JsValue] = {
 		actionHelper.asyncJson[SignInForm](signInForm => request => {
 			val selector = $(
 				"uid" -> signInForm.uid,
 				"password" -> SecurityUtil.sha(signInForm.password),
 				"avaliable" -> true)
-			find(selector).map {
+			val projection = $(
+				"password" -> 0)
+			find(selector, projection).map {
 				case Some(user) => Right(Json.toJson(user))
-				case None => Left(M("e.user.notfound"))
+				case None => Left(M("e.user.avaliable"))
 			}
-		}, signInForm => {
-			case (jsAuth, response) => {
-				val tokenId = (jsAuth \ "token" \ "tokenId").as[String]
-				UserSession(signInForm.uid).save andThen UserCookie(tokenId).save apply response
-			}
+		}, signInForm => jsAuth => {
+				val maySaveCookie = if (signInForm.allowCookie.getOrElse(false)) {
+					(jsAuth \ "token" \ "tokenId").asOpt[String]
+					.map { tokenId =>
+						UserCookie(tokenId).save
+					}
+					.getOrElse(identity[Result] _)
+				} else {
+					identity[Result] _
+				}
+				
+				val jsPrune = (__ \ 'token).json.prune
+				val jsRs = jsAuth.transform(jsPrune).asOpt.getOrElse(jsAuth)
+
+				UserSession(signInForm.uid).save andThen maySaveCookie apply Ok(jsRs)
 		})
 	}
 
-	def signOut(actionHelper: ActionHelper)(implicit exec: ExecutionContext): Action[AnyContent] = {
+	def signOut(actionHelper: ActionHelper)(implicit exec: ExecutionContext, app: Application): Action[AnyContent] = {
 		actionHelper.asyncSessionAny(userSession => request => {
 			Future.successful {
 				Right($("msg" -> M("i.user.signout")))
 			}
 		}, {
-			case (_, response) => {
-				SessionAction.removeUserCookie(response).withNewSession
+			rs => {
+				SessionAction.removeUserCookie(Ok(rs)).withNewSession
 			}
 		})
 	}
 
-	def verify(actionHelper: ActionHelper)(implicit exec: ExecutionContext): Action[AnyContent] = {
+	def verify(actionHelper: ActionHelper)(implicit exec: ExecutionContext, app: Application): Action[AnyContent] = {
 		actionHelper.asyncAny { request =>
 			request.getQueryString("tokenId").map { tokenId =>
 				find($("token.tokenId" -> tokenId)).flatMap {
-					case Some(user) =>
-						user.copy(
-							token = Token(verified = true, expireDate = 0),
-							avaliable = true)
-							.save
-							.map { _ => Right($("msg" -> M("i.user.verified"))) }
-
-					case None => Future.successful(Left(M("e.user.verified")))
+					_.map { auth =>
+						Auth.authFmt.reads(auth).fold(
+							invalid => {
+								Logger.warn(JsError.toFlatJson(invalid).toString)
+								Future.successful(Left(M("e.user.verified")))
+							}, user => {
+								user.copy(
+									token = Token(verified = true, expireDate = 0),
+									avaliable = true)
+									.save
+									.map { _ => Right($("msg" -> M("i.user.verified"))) }
+							})
+					}.getOrElse(Future.successful(Left(M("e.user.avaliable"))))
 				}
 			}.getOrElse(Future.successful(Left(M("e.user.verified"))))
 		}

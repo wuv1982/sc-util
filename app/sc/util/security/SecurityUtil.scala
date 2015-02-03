@@ -1,6 +1,8 @@
 package sc.util.security
 
 import scala.util.Random
+import com.typesafe.config.ConfigFactory
+import java.security.MessageDigest
 
 object SecurityUtil {
 
@@ -8,8 +10,17 @@ object SecurityUtil {
 		(new Random).alphanumeric.take(len).mkString
 	}
 
-	private val mdSHA = java.security.MessageDigest.getInstance("SHA-256")
-	private val SALT_SHA = "sc"
+	private lazy val mdSHA:MessageDigest = java.security.MessageDigest.getInstance("SHA-256")
+	
+	private lazy val SALT_SHA:String = {
+		val config = ConfigFactory.load()
+		val keyPath = "application.secret"
+		if (config.hasPath(keyPath)) {
+			config.getString(keyPath)
+		} else {
+			"sc"
+		}
+	}
 
 	def sha(s: String): String = {
 		// add a salt. can replace salt with generated salt value

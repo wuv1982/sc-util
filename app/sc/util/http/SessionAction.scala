@@ -3,7 +3,7 @@ package sc.util.http
 import play.api.mvc._
 import scala.concurrent.Future
 import sc.ma.Json._
-import sc.util.fmt.Short._
+import sc.util.fmt.MessageShorter._
 import scala.concurrent.ExecutionContext.Implicits.global
 import play.api.libs.json.Json.toJsFieldJsValueWrapper
 

@@ -5,7 +5,8 @@ import play.api.libs.json.Json
 
 case class SignInForm(
 	uid: String,
-	password: String)
+	password: String,
+	allowCookie:Option[Boolean])
 
 object SignInForm {
 	implicit val signUpFormFmt: Format[SignInForm] = Json.format[SignInForm]
