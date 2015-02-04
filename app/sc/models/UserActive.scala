@@ -23,10 +23,10 @@ case class UserAction(
 	timestamp: Long,
 	duration: Long = 0)
 
-object UserActive extends DBHelper with Controller with MongoController {
+object UserActive {
 	implicit val userActionFmt: Format[UserAction] = Json.format[UserAction]
 	implicit val activeFmt: Format[UserActive] = Json.format[UserActive]
 
-	lazy val userActive = db.collection[JSONCollection]("userActive")
+	lazy val userActive = DBHelper.getCollection("userActive")
 }
 

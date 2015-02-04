@@ -12,8 +12,8 @@ import play.api.Logger
 import reactivemongo.api.collections.GenericQueryBuilder
 import play.api.libs.json.Reads
 import play.api.libs.json.Writes
-
 import sc.ma.Json._
+import play.api.mvc.Controller
 
 trait DBHelper {
 
@@ -68,4 +68,8 @@ trait DBHelper {
 					None
 			}
 	}
+}
+
+object DBHelper extends DBHelper with MongoController with Controller {
+	def getCollection(name:String) = db.collection[JSONCollection](name)
 }

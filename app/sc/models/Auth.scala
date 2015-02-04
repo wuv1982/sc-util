@@ -47,9 +47,9 @@ case class Auth(
 		avaliable: Boolean,
 		role: String) extends Model[Auth] {
 
-	override def collection = AuthDB.auth
+	override def collection = Auth.auth
 
-	override def save(implicit exec: ExecutionContext, format: Format[Auth]): Future[Boolean] = {
+	override def save(implicit exec: ExecutionContext, write: Writes[Auth]): Future[Boolean] = {
 		super.save.map { rs =>
 			if (rs) {
 				import play.api.Play.current
@@ -72,10 +72,13 @@ case class HisAuth(
 		uid: String,
 		email: Option[String]) extends Model[HisAuth] {
 
-	override def collection = AuthDB.hisAuth
+	override def collection = Auth.hisAuth
 }
 
 object Auth {
+	lazy val auth = DBHelper.getCollection("userAuth")
+	lazy val hisAuth = DBHelper.getCollection("hisAuth")
+	
 	implicit val DATE_EXPIRE_DURATION = 1000 * 60 * 60 * 3
 
 	implicit val tokenFmt: Format[Token] = Json.format[Token]
@@ -119,7 +122,7 @@ object Auth {
 	}
 
 	def find(selector: JsValue, projection: JsValue = $())(implicit exec: ExecutionContext, app: Application): Future[Option[JsValue]] = {
-		AuthDB.query(AuthDB.auth)(selector, projection).map {
+		DBHelper.query(Auth.auth)(selector, projection).map {
 			_.flatMap { rs => rs.headOption }
 		}
 	}
@@ -221,9 +224,4 @@ object Auth {
 		}
 	}
 
-}
-
-object AuthDB extends DBHelper with Controller with MongoController {
-	lazy val auth = db.collection[JSONCollection]("userAuth")
-	lazy val hisAuth = db.collection[JSONCollection]("hisAuth")
 }
