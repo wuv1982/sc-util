@@ -21,7 +21,7 @@ trait Model[T] {
 
 	def update(implicit exec: ExecutionContext, writes: Writes[T]): Future[Boolean] = {
 		DBHelper.update(collection)(_.update(
-			$("_id" ->_id),
+			$("_id" -> _id),
 			$("$set" -> writes.writes(this.asInstanceOf[T]))))
 	}
 }
