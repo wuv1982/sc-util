@@ -6,6 +6,7 @@ import sc.ma.Json._
 import sc.util.fmt.MessageShorter._
 import scala.concurrent.ExecutionContext.Implicits.global
 import play.api.libs.json.Json.toJsFieldJsValueWrapper
+import play.api.Logger
 
 trait Anonymousable {
 	def anonymousUid: Option[(UserSession, AnonymousUserCookie)] = None
@@ -60,23 +61,33 @@ trait SessionAction extends ActionBuilder[SessionRequest] {
 			onSuccess = userSession => block(SessionRequest(userSession, request)))(request)
 	}
 
+	def onUnauthorized[A]: Request[A] => Future[Result] = { _ =>
+		Future.successful(Results.Unauthorized($("msg" -> M("e.user.unauthorized"))))
+	}
+
 	private def authorize[A](
-		onSuccess: UserSession => Future[Result],
-		onUnauthorized: => Future[Result] = { Future.successful(Results.Unauthorized($("msg" -> M("e.user.unauthorized")))) })(implicit request: Request[A]): Future[Result] = {
+		onSuccess: UserSession => Future[Result])(implicit request: Request[A]): Future[Result] = {
 
 		request.session.get(SessionAction.KEY_SESSION_UID).map { uid =>
+			Logger.debug(s"in session [$uid]")
 			onSuccess(UserSession(uid))
 		}.getOrElse {
 			findByCookie(request).flatMap {
 				case Some(userSession) =>
+					Logger.debug(s"found by cookied")
 					onSuccess(userSession)
 						.map(userSession.save)
 				case None =>
+					Logger.debug(s"not found by cookied.")
 					anonymousUid.map {
 						case (userSession, userCookie) =>
+							Logger.info("create anonymous user")
 							onSuccess(userSession)
 								.map(userSession.save andThen userCookie.save)
-					}.getOrElse(onUnauthorized)
+					}.getOrElse {
+						Logger.warn("unauthorized user")
+						onUnauthorized(request)
+					}
 			}
 		}
 	}
