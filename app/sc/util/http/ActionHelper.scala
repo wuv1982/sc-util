@@ -17,25 +17,30 @@ trait ActionHelper {
 
 	def sessionAction: SessionAction
 
+	private def defaultResult[T]: T => Result = {
+		case jsResult: JsValue => Ok(jsResult)
+		case _ => Ok
+	}
+
 	def asyncJson[T](
 		f: T => Request[JsValue] => Future[Either[String, JsValue]],
 		r: T => JsValue => Result = { form: T => rs: JsValue => Ok(rs) })(implicit validator: Format[T]): Action[JsValue] = {
 		Action.async(parse.json) { request =>
-			invokeRequest(f, r)(validator)(request)
+			invokeValidateRequest(f, r)(validator)(request)
 		}
 	}
 
-	def async[A](parser: BodyParser[A])(
-		f: Request[A] => Future[Either[String, JsValue]],
-		r: JsValue => Result = { rs => Ok(rs) }): Action[A] = {
+	def async[A, T](parser: BodyParser[A])(
+		f: Request[A] => Future[Either[String, T]],
+		r: T => Result = defaultResult): Action[A] = {
 		Action.async(parser) { request =>
 			invokeRequest(f, r)(request)
 		}
 	}
 
-	def asyncAny(
-		f: Request[AnyContent] => Future[Either[String, JsValue]],
-		r: JsValue => Result = { rs => Ok(rs) }): Action[AnyContent] = {
+	def asyncAny[T](
+		f: Request[AnyContent] => Future[Either[String, T]],
+		r: T => Result = defaultResult): Action[AnyContent] = {
 		async(parse.anyContent)(f, r)
 	}
 
@@ -44,7 +49,7 @@ trait ActionHelper {
 		r: T => JsValue => Result = { form: T => rs: JsValue => Ok(rs) })(implicit validator: Format[T]): Action[JsValue] = {
 
 		sessionAction.async(parse.json) { sessionRequest =>
-			invokeRequest(f(sessionRequest.userSession), r)(validator)(sessionRequest.request)
+			invokeValidateRequest(f(sessionRequest.userSession), r)(validator)(sessionRequest.request)
 		}
 	}
 
@@ -62,16 +67,20 @@ trait ActionHelper {
 		asyncSession(parse.anyContent)(f, r)
 	}
 
-	private def invokeRequest[T](
-		f: Request[T] => Future[Either[String, JsValue]],
-		r: JsValue => Result = { rs => Ok(rs) }): Request[T] => Future[Result] = request => {
+	private def invokeRequest[A, T](
+		f: Request[A] => Future[Either[String, T]],
+		r: T => Result): Request[A] => Future[Result] = request => {
 		f(request).map {
 			case Left(failure) => {
 				Logger.warn(s"Forbidden [403] : $failure")
 				Forbidden(Json.obj("msg" -> failure))
 			}
 			case Right(success) => {
-				Logger.info(s"Ok [200]: ${Json.prettyPrint(success)}")
+				if (success.isInstanceOf[JsValue]) {
+					Logger.info(s"Ok [200]: ${Json.prettyPrint(success.asInstanceOf[JsValue])}")
+				} else {
+					Logger.info("Ok [200]")
+				}
 				r(success)
 			}
 		}.recover {
@@ -81,7 +90,7 @@ trait ActionHelper {
 		}
 	}
 
-	private def invokeRequest[T](
+	private def invokeValidateRequest[T](
 		f: T => Request[JsValue] => Future[Either[String, JsValue]],
 		r: T => JsValue => Result)(implicit validator: Format[T]): Request[JsValue] => Future[Result] = request => {
 

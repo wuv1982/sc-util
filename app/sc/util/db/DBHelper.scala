@@ -29,32 +29,15 @@ trait DBHelper {
 			}
 	}
 
-	def query(collection: JSONCollection)(selector: JsValue, projection: JsValue = $("_id" -> 1)): Future[Option[Seq[JsObject]]] = {
-		collection
-			.find(selector, projection)
-			.cursor[JsObject]
-			.collect[Seq]()
-			.map { list =>
-				if (list.isEmpty) {
-					None
-				} else {
-					Some(list)
-				}
-			}
-			.recover {
-				case ex =>
-					Logger.error("db execution error", ex)
-					None
-			}
-	}
-
-	def queryFilter(collection: JSONCollection,
-		filter: GenericQueryBuilder[JsObject, Reads, Writes] => GenericQueryBuilder[JsObject, Reads, Writes], upTo: Int = Int.MaxValue)(
-			selector: JsValue, projection: JsValue = $("_id" -> 1)): Future[Option[Seq[JsObject]]] = {
+	def query(collection: JSONCollection)(
+		selector: JsValue,
+		projection: JsValue = $(),
+		filter: GenericQueryBuilder[JsObject, Reads, Writes] => GenericQueryBuilder[JsObject, Reads, Writes] = { identity _ },
+		upTo: Int = Int.MaxValue): Future[Option[Seq[JsObject]]] = {
 
 		filter(collection.find(selector, projection))
 			.cursor[JsObject]
-			.collect[Seq](upTo)
+			.collect[Seq]()
 			.map { list =>
 				if (list.isEmpty) {
 					None
@@ -71,5 +54,5 @@ trait DBHelper {
 }
 
 object DBHelper extends DBHelper with MongoController with Controller {
-	def getCollection(name:String) = db.collection[JSONCollection](name)
+	def getCollection(name: String) = db.collection[JSONCollection](name)
 }

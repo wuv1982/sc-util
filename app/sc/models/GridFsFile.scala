@@ -13,6 +13,11 @@ import reactivemongo.bson.BSONDocumentWriter
 import reactivemongo.bson.BSONObjectID
 import sc.util.db.DBHelper
 import play.api.Logger
+import reactivemongo.api.Cursor
+import play.modules.reactivemongo.json.BSONFormats
+import play.modules.reactivemongo.json.BSONFormats.BSONDocumentFormat
+import reactivemongo.api.gridfs.ReadFile
+import reactivemongo.bson.BSONValue
 
 case class GridFsFile(
 		_id: Oid,
@@ -25,16 +30,9 @@ case class GridFsFile(
 		metadata: JsValue) extends Model[GridFsFile] {
 
 	override def collection = GridFsFile.files
-}
 
-object GridFsFile {
-	val files = DBHelper.getCollection("fs.files")
-
-	implicit val gridFsFmt: Format[GridFsFile] = Json.format[GridFsFile]
-
-	def remove(oid: String)(implicit exec: ExecutionContext): Future[Boolean] = {
-		val gridFs = GridFS(DBHelper.db)
-		gridFs.remove(BSONObjectID(oid)).map {
+	override def remove(implicit exec: ExecutionContext): Future[Boolean] = {
+		GridFsFile.gridFs.remove(_id.toBsonObj).map {
 			_.err.map { e =>
 				Logger.error(e)
 				false
@@ -43,4 +41,28 @@ object GridFsFile {
 			}
 		}
 	}
+}
+
+object GridFsFile {
+	val files = DBHelper.getCollection("fs.files")
+	val gridFs = GridFS(DBHelper.db)
+
+	implicit val gridFsFmt: Format[GridFsFile] = Json.format[GridFsFile]
+
+	def findOne(oid: Oid)(implicit exec: ExecutionContext): Future[Option[(ReadFile[BSONValue], GridFsFile)]] = {
+		gridFs.find(BSONDocument("_id" -> oid.toBsonObj)).headOption.map {
+			_.map { file =>
+				(file, GridFsFile(
+					Oid(file.id.asInstanceOf[BSONObjectID].stringify),
+					file.contentType,
+					file.filename,
+					file.uploadDate,
+					file.chunkSize,
+					file.length,
+					file.md5,
+					BSONDocumentFormat.writes(file.metadata)))
+			}
+		}
+	}
+
 }

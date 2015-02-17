@@ -47,7 +47,7 @@ case class Auth(
 		avaliable: Boolean,
 		role: String) extends Model[Auth] {
 
-	override def collection = Auth.auth
+	override def collection = Auth.collection
 
 	override def save(implicit exec: ExecutionContext, write: Writes[Auth]): Future[Boolean] = {
 		super.save.map { rs =>
@@ -75,10 +75,10 @@ case class HisAuth(
 	override def collection = Auth.hisAuth
 }
 
-object Auth {
-	lazy val auth = DBHelper.getCollection("userAuth")
+object Auth extends ModelQuery[Auth] {
+	override val collection = DBHelper.getCollection("userAuth")
+
 	lazy val hisAuth = DBHelper.getCollection("hisAuth")
-	
 	implicit val DATE_EXPIRE_DURATION = 1000 * 60 * 60 * 3
 
 	implicit val tokenFmt: Format[Token] = Json.format[Token]
@@ -104,33 +104,10 @@ object Auth {
 		anonymous
 	}
 
-	def find(uid: String)(implicit exec: ExecutionContext, app: Application): Future[Option[Auth]] = {
-		Cache.getAs[Auth](uid)
-			.map(auth => Future.successful(Some(auth)))
-			.getOrElse(find($("uid" -> uid)).map {
-				_.flatMap { auth =>
-					Auth.authFmt.reads(auth).fold(
-						invalid => {
-							Logger.warn(JsError.toFlatJson(invalid).toString)
-							None
-						}, auth => {
-							Cache.set(auth.uid, auth)
-							Some(auth)
-						})
-				}
-			})
-	}
-
-	def find(selector: JsValue, projection: JsValue = $())(implicit exec: ExecutionContext, app: Application): Future[Option[JsValue]] = {
-		DBHelper.query(Auth.auth)(selector, projection).map {
-			_.flatMap { rs => rs.headOption }
-		}
-	}
-
 	def sighUp(actionHelper: ActionHelper)(implicit exec: ExecutionContext, app: Application): Action[JsValue] = {
 		actionHelper.asyncJson[SignUpForm](signUpForm => request => {
 			find(Json.toJson(signUpForm)).flatMap {
-				case None => {
+				case userList if userList.isEmpty => {
 					val user = Auth(
 						Oid.newOid,
 						signUpForm.uid,
@@ -161,63 +138,60 @@ object Auth {
 	}
 
 	def signIn(actionHelper: ActionHelper)(implicit exec: ExecutionContext, app: Application): Action[JsValue] = {
-		actionHelper.asyncJson[SignInForm](signInForm => request => {
-			val selector = $(
-				"uid" -> signInForm.uid,
-				"password" -> SecurityUtil.sha(signInForm.password),
-				"avaliable" -> true)
-			val projection = $(
-				"password" -> 0)
-			find(selector, projection).map {
-				case Some(user) => Right(Json.toJson(user))
-				case None => Left(M("e.user.avaliable"))
-			}
-		}, signInForm => jsAuth => {
+		actionHelper.asyncJson[SignInForm](
+			signInForm => request => {
+				val selector = $(
+					"uid" -> signInForm.uid,
+					"password" -> SecurityUtil.sha(signInForm.password),
+					"avaliable" -> true)
+				val projection = $(
+					"password" -> 0)
+				DBHelper.query(collection)(selector, projection).map {
+					case Some(user) => Right(Json.toJson(user.head))
+					case None => Left(M("e.user.avaliable"))
+				}
+			},
+			signInForm => jsAuth => {
 				val maySaveCookie = if (signInForm.allowCookie.getOrElse(false)) {
 					(jsAuth \ "token" \ "tokenId").asOpt[String]
-					.map { tokenId =>
-						UserCookie(tokenId).save
-					}
-					.getOrElse(identity[Result] _)
+						.map { tokenId =>
+							UserCookie(tokenId).save
+						}
+						.getOrElse(identity[Result] _)
 				} else {
 					identity[Result] _
 				}
-				
+
 				val jsPrune = (__ \ 'token).json.prune
 				val jsRs = jsAuth.transform(jsPrune).asOpt.getOrElse(jsAuth)
 
 				UserSession(signInForm.uid).save andThen maySaveCookie apply Ok(jsRs)
-		})
+			})
 	}
 
 	def signOut(actionHelper: ActionHelper)(implicit exec: ExecutionContext, app: Application): Action[AnyContent] = {
-		actionHelper.asyncSessionAny(userSession => request => {
-			Future.successful {
-				Right($("msg" -> M("i.user.signout")))
-			}
-		}, {
-			rs => {
-				SessionAction.removeUserCookie(Ok(rs)).withNewSession
-			}
-		})
+		actionHelper.asyncSessionAny(
+			userSession => request => {
+				Future.successful {
+					Right($("msg" -> M("i.user.signout")))
+				}
+			},
+			{
+				rs => SessionAction.removeUserCookie(Ok(rs)).withNewSession
+			})
 	}
 
 	def verify(actionHelper: ActionHelper)(implicit exec: ExecutionContext, app: Application): Action[AnyContent] = {
 		actionHelper.asyncAny { request =>
 			request.getQueryString("tokenId").map { tokenId =>
 				find($("token.tokenId" -> tokenId)).flatMap {
-					_.map { auth =>
-						Auth.authFmt.reads(auth).fold(
-							invalid => {
-								Logger.warn(JsError.toFlatJson(invalid).toString)
-								Future.successful(Left(M("e.user.verified")))
-							}, user => {
-								user.copy(
-									token = Token(verified = true, expireDate = 0),
-									avaliable = true)
-									.save
-									.map { _ => Right($("msg" -> M("i.user.verified"))) }
-							})
+					_.headOption.map { user =>
+						user.copy(
+							token = Token(verified = true, expireDate = 0),
+							avaliable = true)
+							.save
+							.map { _ => Right($("msg" -> M("i.user.verified"))) }
+
 					}.getOrElse(Future.successful(Left(M("e.user.avaliable"))))
 				}
 			}.getOrElse(Future.successful(Left(M("e.user.verified"))))
