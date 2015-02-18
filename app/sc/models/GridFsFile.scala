@@ -18,6 +18,13 @@ import play.modules.reactivemongo.json.BSONFormats
 import play.modules.reactivemongo.json.BSONFormats.BSONDocumentFormat
 import reactivemongo.api.gridfs.ReadFile
 import reactivemongo.bson.BSONValue
+import java.io.OutputStream
+import play.api.libs.Files.TemporaryFile
+import java.util.zip.ZipOutputStream
+import java.io.FileOutputStream
+import java.util.zip.ZipEntry
+import play.api.libs.iteratee.Iteratee
+import java.io.File
 
 case class GridFsFile(
 		_id: Oid,
@@ -65,4 +72,34 @@ object GridFsFile {
 		}
 	}
 
+	def zipGridFsFile(fileIds: Seq[Oid], output: OutputStream)(implicit exec: ExecutionContext): Future[Unit] = {
+		val zipOutStream = new ZipOutputStream(output)
+
+		fileIds.foldLeft(Future.successful(Unit)) {
+			case (fu, fileId) =>
+				fu.flatMap { _ =>
+					Logger.debug("zip file:" + fileId)
+					GridFsFile.findOne(fileId).flatMap {
+						case Some((file, model)) =>
+							val fileEnumerator = gridFs.enumerate(file)
+							zipOutStream.putNextEntry(new ZipEntry(file.filename))
+							Logger.debug("new entry " + file.filename)
+
+							(fileEnumerator |>>> Iteratee.foreach { chunk =>
+								Logger.debug("write chunk of " + file.filename)
+								zipOutStream.write(chunk)
+							}).map { _ =>
+								Logger.debug("close entry " + file.filename)
+								zipOutStream.closeEntry()
+								Unit
+							}
+						case None =>
+							Logger.debug("not find file:" + fileId)
+							Future.successful(Unit)
+					}
+				}
+		}.map { _ =>
+			zipOutStream.close()
+		}
+	}
 }
