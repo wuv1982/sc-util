@@ -57,6 +57,7 @@ object GridFsFile {
 	implicit val gridFsFmt: Format[GridFsFile] = Json.format[GridFsFile]
 
 	def findOne(oid: Oid)(implicit exec: ExecutionContext): Future[Option[(ReadFile[BSONValue], GridFsFile)]] = {
+		Logger.debug("find " + oid.$oid)
 		gridFs.find(BSONDocument("_id" -> oid.toBsonObj)).headOption.map {
 			_.map { file =>
 				(file, GridFsFile(
@@ -69,37 +70,46 @@ object GridFsFile {
 					file.md5,
 					BSONDocumentFormat.writes(file.metadata)))
 			}
+		}.recover {
+			case ex =>
+				ex.printStackTrace()
+				None
 		}
 	}
 
 	def zipGridFsFile(fileIds: Seq[Oid], output: OutputStream)(implicit exec: ExecutionContext): Future[Unit] = {
 		val zipOutStream = new ZipOutputStream(output)
 
-		fileIds.foldLeft(Future.successful(Unit)) {
-			case (fu, fileId) =>
-				fu.flatMap { _ =>
-					Logger.debug("zip file:" + fileId)
-					GridFsFile.findOne(fileId).flatMap {
-						case Some((file, model)) =>
-							val fileEnumerator = gridFs.enumerate(file)
-							zipOutStream.putNextEntry(new ZipEntry(file.filename))
-							Logger.debug("new entry " + file.filename)
+		Future.fold(fileIds.map(GridFsFile.findOne))(Future.successful(Unit)) {
+			case (acc, Some((file, model))) =>
+				Logger.debug("fold")
+				acc.flatMap { _ =>
+					Logger.debug("flat")
+					val fileEnumerator = gridFs.enumerate(file)
+					zipOutStream.putNextEntry(new ZipEntry(file.filename))
+					Logger.debug("new entry " + file.filename)
 
-							(fileEnumerator |>>> Iteratee.foreach { chunk =>
-								Logger.debug("write chunk of " + file.filename)
-								zipOutStream.write(chunk)
-							}).map { _ =>
-								Logger.debug("close entry " + file.filename)
-								zipOutStream.closeEntry()
-								Unit
-							}
-						case None =>
-							Logger.debug("not find file:" + fileId)
-							Future.successful(Unit)
+					(fileEnumerator |>>> Iteratee.foreach { chunk =>
+						Logger.debug("write chunk of " + file.filename)
+						zipOutStream.write(chunk)
+					}).map { _ =>
+						Logger.debug("close entry " + file.filename)
+						zipOutStream.closeEntry()
+						Unit
 					}
+				}.recover {
+					case ex =>
+						Logger.error("entry write failed", ex)
+						Unit
 				}
-		}.map { _ =>
-			zipOutStream.close()
+			case _ =>
+				Logger.debug("not find file")
+				Future.successful(Unit)
+		}.flatMap {
+			_.map { _ =>
+				Logger.debug("close stream")
+				zipOutStream.close()
+			}
 		}
 	}
 }
