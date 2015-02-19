@@ -12,8 +12,8 @@ import sc.models.Auth.tokenFmt
 import sc.models.Token
 
 class AuthActionHelper[T](
-		val appendProfile: Auth => T = { auth: Auth => auth })(
-				implicit exec: ExecutionContext, app: Application) extends ActionHelper {
+	val appendProfile: Auth => T = { auth: Auth => auth })(
+		implicit exec: ExecutionContext) extends ActionHelper {
 
 	override def sessionAction = new SessionAction with Anonymousable with Cookieable {
 
