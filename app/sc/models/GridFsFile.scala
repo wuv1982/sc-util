@@ -82,9 +82,7 @@ object GridFsFile {
 
 		Future.fold(fileIds.map(GridFsFile.findOne))(Future.successful(Unit)) {
 			case (acc, Some((file, model))) =>
-				Logger.debug("fold")
 				acc.flatMap { _ =>
-					Logger.debug("flat")
 					val fileEnumerator = gridFs.enumerate(file)
 					zipOutStream.putNextEntry(new ZipEntry(file.filename))
 					Logger.debug("new entry " + file.filename)
