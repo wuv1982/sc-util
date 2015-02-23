@@ -20,7 +20,7 @@ trait MongoModel {
 	def collection: JSONCollection
 }
 
-trait Model[T] extends MongoModel {
+trait ModelEntity[T] extends MongoModel {
 	def _id: Oid
 
 	def save(implicit exec: ExecutionContext, writes: Writes[T]): Future[Boolean] = {
