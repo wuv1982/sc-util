@@ -27,14 +27,14 @@ import play.api.libs.iteratee.Iteratee
 import java.io.File
 
 case class GridFsFile(
-		_id: Oid,
-		contentType: Option[String],
-		filename: String,
-		uploadDate: Option[Long],
-		chunkSize: Int,
-		length: Int,
-		md5: Option[String],
-		metadata: JsValue) extends Model[GridFsFile] {
+	_id: Oid,
+	contentType: Option[String],
+	filename: String,
+	uploadDate: Option[Long],
+	chunkSize: Int,
+	length: Int,
+	md5: Option[String],
+	metadata: JsValue) extends ModelEntity[GridFsFile] {
 
 	override def collection = GridFsFile.files
 

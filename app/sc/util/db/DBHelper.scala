@@ -35,19 +35,22 @@ trait DBHelper {
 		filter: GenericQueryBuilder[JsObject, Reads, Writes] => GenericQueryBuilder[JsObject, Reads, Writes] = { identity _ },
 		upTo: Int = Int.MaxValue): Future[Option[Seq[JsObject]]] = {
 
+		Logger.debug(s"[${collection.name}] query: $selector")
 		filter(collection.find(selector, projection))
 			.cursor[JsObject]
 			.collect[Seq]()
 			.map { list =>
 				if (list.isEmpty) {
+					Logger.debug(s"[${collection.name}] query empty")
 					None
 				} else {
+					Logger.debug(s"[${collection.name}] query result length: ${list.length}")
 					Some(list)
 				}
 			}
 			.recover {
 				case ex =>
-					Logger.error("db execution error", ex)
+					Logger.error(s"[${collection.name}] query error", ex)
 					None
 			}
 	}

@@ -22,9 +22,9 @@ trait ActionHelper {
 		case _ => Ok
 	}
 
-	def asyncJson[T](
-		f: T => Request[JsValue] => Future[Either[String, JsValue]],
-		r: T => JsValue => Result = { form: T => rs: JsValue => Ok(rs) })(implicit validator: Format[T]): Action[JsValue] = {
+	def asyncJson[F](
+		f: F => Request[JsValue] => Future[Either[String, JsValue]],
+		r: F => JsValue => Result = { form: F => rs: JsValue => Ok(rs) })(implicit validator: Format[F]): Action[JsValue] = {
 		Action.async(parse.json) { request =>
 			invokeValidateRequest(f, r)(validator)(request)
 		}
@@ -44,26 +44,26 @@ trait ActionHelper {
 		async(parse.anyContent)(f, r)
 	}
 
-	def asyncSessionJson[T](
-		f: UserSession => T => Request[JsValue] => Future[Either[String, JsValue]],
-		r: T => JsValue => Result = { form: T => rs: JsValue => Ok(rs) })(implicit validator: Format[T]): Action[JsValue] = {
+	def asyncSessionJson[F](
+		f: UserSession => F => Request[JsValue] => Future[Either[String, JsValue]],
+		r: F => JsValue => Result = { form: F => rs: JsValue => Ok(rs) })(implicit validator: Format[F]): Action[JsValue] = {
 
 		sessionAction.async(parse.json) { sessionRequest =>
 			invokeValidateRequest(f(sessionRequest.userSession), r)(validator)(sessionRequest.request)
 		}
 	}
 
-	def asyncSession[A](parser: BodyParser[A])(
-		f: UserSession => Request[A] => Future[Either[String, JsValue]],
-		r: JsValue => Result = { rs => Ok(rs) }): Action[A] = {
+	def asyncSession[A, T](parser: BodyParser[A])(
+		f: UserSession => Request[A] => Future[Either[String, T]],
+		r: T => Result = defaultResult): Action[A] = {
 		sessionAction.async(parser) { sessionRequest =>
 			invokeRequest(f(sessionRequest.userSession), r)(sessionRequest.request)
 		}
 	}
 
-	def asyncSessionAny(
-		f: UserSession => Request[AnyContent] => Future[Either[String, JsValue]],
-		r: JsValue => Result = { rs => Ok(rs) }): Action[AnyContent] = {
+	def asyncSessionAny[T](
+		f: UserSession => Request[AnyContent] => Future[Either[String, T]],
+		r: T => Result = defaultResult): Action[AnyContent] = {
 		asyncSession(parse.anyContent)(f, r)
 	}
 
@@ -96,9 +96,9 @@ trait ActionHelper {
 
 		validator.reads(request.body).fold(
 			invalid => {
-				val msg = JsError.toFlatJson(invalid)
-				Logger.warn(s"BadRequest [400]: $msg")
-				Future.successful(BadRequest(Json.obj("msg" -> msg)))
+				val error = JsError.toFlatJson(invalid)
+				Logger.warn(s"BadRequest [400]: $error")
+				Future.successful(BadRequest(Json.obj("msg" -> "bad request", "error" -> error)))
 			}, valid => {
 				invokeRequest(f(valid), r(valid))(request)
 			})

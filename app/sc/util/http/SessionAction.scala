@@ -9,7 +9,7 @@ import play.api.libs.json.Json.toJsFieldJsValueWrapper
 import play.api.Logger
 
 trait Anonymousable {
-	def anonymousUid: Option[(UserSession, AnonymousUserCookie)] = None
+	def anonymousUid: Future[Option[(UserSession, AnonymousUserCookie)]] = Future.successful(None)
 }
 
 trait Cookieable {
@@ -18,7 +18,7 @@ trait Cookieable {
 
 case class UserSession(uid: String) {
 	def save: Result => Result = response => {
-		response.withSession(SessionAction.KEY_SESSION_UID -> uid)
+		response.withSession(SessionAction.KEY_SESSION_OID -> uid)
 	}
 }
 
@@ -43,7 +43,7 @@ case class AnonymousUserCookie(tokenId: String) {
 case class SessionRequest[A](userSession: UserSession, request: Request[A]) extends WrappedRequest[A](request)
 
 object SessionAction {
-	val KEY_SESSION_UID: String = "uid"
+	val KEY_SESSION_OID: String = "oid"
 	val KEY_COOKIE_TID: String = "tid"
 	val KEY_COOKIE_ANONYMOUS_TID: String = "anonymous_tid"
 
@@ -68,9 +68,9 @@ trait SessionAction extends ActionBuilder[SessionRequest] {
 	private def authorize[A](
 		onSuccess: UserSession => Future[Result])(implicit request: Request[A]): Future[Result] = {
 
-		request.session.get(SessionAction.KEY_SESSION_UID).map { uid =>
-			Logger.debug(s"in session [$uid]")
-			onSuccess(UserSession(uid))
+		request.session.get(SessionAction.KEY_SESSION_OID).map { oid =>
+			Logger.debug(s"in session [$oid]")
+			onSuccess(UserSession(oid))
 		}.getOrElse {
 			findByCookie(request).flatMap {
 				case Some(userSession) =>
@@ -79,14 +79,15 @@ trait SessionAction extends ActionBuilder[SessionRequest] {
 						.map(userSession.save)
 				case None =>
 					Logger.debug(s"not found by cookied.")
-					anonymousUid.map {
-						case (userSession, userCookie) =>
+					anonymousUid.flatMap {
+						case Some((userSession, userCookie)) =>
 							Logger.info("create anonymous user")
 							onSuccess(userSession)
 								.map(userSession.save andThen userCookie.save)
-					}.getOrElse {
-						Logger.warn("unauthorized user")
-						onUnauthorized(request)
+						case _ => {
+							Logger.warn("unauthorized user")
+							onUnauthorized(request)
+						}
 					}
 			}
 		}

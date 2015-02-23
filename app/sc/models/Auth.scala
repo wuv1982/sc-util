@@ -39,25 +39,15 @@ import sc.util.security.SecurityUtil
 import sc.util.http.AuthActionHelper
 
 case class Auth(
-		_id: Oid,
-		uid: String,
-		email: Option[String],
-		password: String,
-		token: Token,
-		avaliable: Boolean,
-		role: String) extends Model[Auth] {
+	_id: Oid,
+	uid: String,
+	email: Option[String],
+	password: String,
+	token: Token,
+	avaliable: Boolean,
+	role: String) extends ModelEntity[Auth] {
 
 	override def collection = Auth.collection
-
-	override def save(implicit exec: ExecutionContext, write: Writes[Auth]): Future[Boolean] = {
-		super.save.map { rs =>
-			if (rs) {
-				import play.api.Play.current
-				Cache.set(uid, this)
-			}
-			rs
-		}
-	}
 }
 
 case class Token(
@@ -66,11 +56,11 @@ case class Token(
 	expireDate: Long = System.currentTimeMillis() + Auth.DATE_EXPIRE_DURATION)
 
 case class HisAuth(
-		_id: Oid = Oid.newOid,
-		timestamp: Long = System.currentTimeMillis(),
-		authId: Oid,
-		uid: String,
-		email: Option[String]) extends Model[HisAuth] {
+	_id: Oid = Oid.newOid,
+	timestamp: Long = System.currentTimeMillis(),
+	authId: Oid,
+	uid: String,
+	email: Option[String]) extends ModelEntity[HisAuth] {
 
 	override def collection = Auth.hisAuth
 }
@@ -89,7 +79,7 @@ object Auth extends ModelQuery[Auth] {
 	val AUTH_ROLE_ANONYMOUS: String = "anonymous"
 	val AUTH_ROLE_ADMIN: String = "admin"
 
-	def createAnonymousUser(implicit exec: ExecutionContext): Auth = {
+	def createAnonymousUser(implicit exec: ExecutionContext): Future[Auth] = {
 		val anonymous = Auth(
 			Oid.newOid,
 			SecurityUtil.makeToken(16),
@@ -100,34 +90,44 @@ object Auth extends ModelQuery[Auth] {
 				expireDate = 0),
 			true,
 			AUTH_ROLE_ANONYMOUS)
-		anonymous.save
-		anonymous
+		anonymous.save.map { _ =>
+			anonymous
+		}
 	}
 
-	def sighUp(actionHelper: ActionHelper)(implicit exec: ExecutionContext, app: Application): Action[JsValue] = {
+	def sighUp(actionHelper: ActionHelper)(
+		appendProfile: Auth => Future[_] = { _ => Future.successful(Unit) })(
+			implicit exec: ExecutionContext): Action[JsValue] = {
 		actionHelper.asyncJson[SignUpForm](signUpForm => request => {
 			find(Json.toJson(signUpForm)).flatMap {
 				case userList if userList.isEmpty => {
-					val user = Auth(
-						Oid.newOid,
-						signUpForm.uid,
-						Some(signUpForm.uid),
-						SecurityUtil.sha(signUpForm.password),
-						Token(),
-						false,
-						AUTH_ROLE_NORMAL)
-					user.save.map { _ =>
-
-						user.email.map { email =>
-							EmailProvider.send(
-								EmailTemplate(("accounts@sheo.com", M("m.email.from")),
-									Seq(email),
-									M("m.email.subject"),
-									M("m.email.content")))
+					for {
+						user <- Future.successful {
+							Auth(
+								Oid.newOid,
+								signUpForm.uid,
+								Some(signUpForm.uid),
+								SecurityUtil.sha(signUpForm.password),
+								Token(),
+								false,
+								AUTH_ROLE_NORMAL)
 						}
 
-						HisAuth(authId = user._id, uid = user.uid, email = user.email).save
+						_ <- user.save
 
+						_ <- appendProfile(user)
+
+						_ <- user.email.map { email =>
+							EmailProvider.send(
+								EmailTemplate(("support@wishbank.jp", M("m.email.from")),
+									Seq(email),
+									M("m.email.subject"),
+									M("m.email.content", user.token.tokenId)))
+						}.getOrElse(Future.successful(Unit))
+
+						_ <- HisAuth(authId = user._id, uid = user.uid, email = user.email)
+							.save
+					} yield {
 						Right(Json.toJson(user))
 					}
 				}
@@ -137,7 +137,8 @@ object Auth extends ModelQuery[Auth] {
 		})
 	}
 
-	def signIn(actionHelper: ActionHelper)(implicit exec: ExecutionContext, app: Application): Action[JsValue] = {
+	def signIn(actionHelper: ActionHelper)(
+		implicit exec: ExecutionContext, app: Application): Action[JsValue] = {
 		actionHelper.asyncJson[SignInForm](
 			signInForm => request => {
 				val selector = $(
@@ -164,24 +165,27 @@ object Auth extends ModelQuery[Auth] {
 
 				val jsPrune = (__ \ 'token).json.prune
 				val jsRs = jsAuth.transform(jsPrune).asOpt.getOrElse(jsAuth)
+				val oid = (jsAuth \ "_id" \ "$oid").as[String]
 
-				UserSession(signInForm.uid).save andThen maySaveCookie apply Ok(jsRs)
+				UserSession(oid).save andThen maySaveCookie apply Ok(jsRs)
 			})
 	}
 
-	def signOut(actionHelper: ActionHelper)(implicit exec: ExecutionContext, app: Application): Action[AnyContent] = {
-		actionHelper.asyncSessionAny(
+	def signOut(actionHelper: ActionHelper)(
+		implicit exec: ExecutionContext, app: Application): Action[AnyContent] = {
+		actionHelper.asyncSessionAny[JsValue](
 			userSession => request => {
 				Future.successful {
 					Right($("msg" -> M("i.user.signout")))
 				}
 			},
 			{
-				rs => SessionAction.removeUserCookie(Ok(rs)).withNewSession
+				js => SessionAction.removeUserCookie(Ok(js)).withNewSession
 			})
 	}
 
-	def verify(actionHelper: ActionHelper)(implicit exec: ExecutionContext, app: Application): Action[AnyContent] = {
+	def verify(actionHelper: ActionHelper)(
+		implicit exec: ExecutionContext, app: Application): Action[AnyContent] = {
 		actionHelper.asyncAny { request =>
 			request.getQueryString("tokenId").map { tokenId =>
 				find($("token.tokenId" -> tokenId)).flatMap {

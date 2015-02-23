@@ -12,7 +12,7 @@ case class UserActive(
 	authId: Oid,
 	uid: String,
 	name: String,
-	action: Seq[UserAction]) extends Model[UserActive] {
+	action: Seq[UserAction]) extends ModelEntity[UserActive] {
 
 	override def collection = UserActive.userActive
 
@@ -29,4 +29,3 @@ object UserActive {
 
 	lazy val userActive = DBHelper.getCollection("userActive")
 }
-
