@@ -27,14 +27,14 @@ import play.api.libs.iteratee.Iteratee
 import java.io.File
 
 case class GridFsFile(
-	_id: Oid,
-	contentType: Option[String],
-	filename: String,
-	uploadDate: Option[Long],
-	chunkSize: Int,
-	length: Int,
-	md5: Option[String],
-	metadata: JsValue) extends ModelEntity[GridFsFile] {
+		_id: Oid,
+		contentType: Option[String],
+		filename: String,
+		uploadDate: Option[Long],
+		chunkSize: Int,
+		length: Int,
+		md5: Option[String],
+		metadata: JsValue) extends ModelEntity[GridFsFile] {
 
 	override def collection = GridFsFile.files
 
@@ -55,6 +55,18 @@ object GridFsFile {
 	val gridFs = GridFS(DBHelper.db)
 
 	implicit val gridFsFmt: Format[GridFsFile] = Json.format[GridFsFile]
+
+	def fromFile(file: ReadFile[BSONValue], meta: JsValue): GridFsFile = {
+		GridFsFile(
+			Oid(file.id.asInstanceOf[BSONObjectID].stringify),
+			file.contentType,
+			file.filename,
+			file.uploadDate,
+			file.chunkSize,
+			file.length,
+			file.md5,
+			meta)
+	}
 
 	def findOne(oid: Oid)(implicit exec: ExecutionContext): Future[Option[(ReadFile[BSONValue], GridFsFile)]] = {
 		Logger.debug("find " + oid.$oid)
@@ -77,16 +89,29 @@ object GridFsFile {
 		}
 	}
 
+	def write(fileId: Oid, output: OutputStream)(implicit exec: ExecutionContext): Future[Unit] = {
+		GridFsFile.findOne(fileId).flatMap {
+			case Some((file, model)) => {
+				val fileEnumerator = gridFs.enumerate(file)
+				(fileEnumerator |>>> Iteratee.foreach { chunk =>
+					Logger.debug("write chunk of " + file.filename)
+					output.write(chunk)
+				})
+			}
+			case _ => Future.successful(Unit)
+		}
+	}
+
 	def zipGridFsFile(fileIds: Seq[Oid], output: OutputStream)(implicit exec: ExecutionContext): Future[Unit] = {
 		val zipOutStream = new ZipOutputStream(output)
 
 		Future.fold(fileIds.map(GridFsFile.findOne))(Future.successful(Unit)) {
 			case (acc, Some((file, model))) =>
 				acc.flatMap { _ =>
-					val fileEnumerator = gridFs.enumerate(file)
 					zipOutStream.putNextEntry(new ZipEntry(file.filename))
 					Logger.debug("new entry " + file.filename)
 
+					val fileEnumerator = gridFs.enumerate(file)
 					(fileEnumerator |>>> Iteratee.foreach { chunk =>
 						Logger.debug("write chunk of " + file.filename)
 						zipOutStream.write(chunk)
