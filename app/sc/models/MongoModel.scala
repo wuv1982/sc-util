@@ -43,13 +43,13 @@ trait ModelQuery[T] extends MongoModel {
 
 	def find(selector: JsValue,
 		filter: GenericQueryBuilder[JsObject, Reads, Writes] => GenericQueryBuilder[JsObject, Reads, Writes] = { identity _ },
-		upTo: Int = Int.MaxValue)(implicit exec: ExecutionContext, reads: Reads[T]): Future[Seq[T]] = {
+		upTo: Int = Int.MaxValue)(implicit exec: ExecutionContext, reads: Reads[T], m: Manifest[T]): Future[Seq[T]] = {
 		DBHelper.query(collection)(selector, $(), filter, upTo).map { mayList =>
 			mayList.map { list =>
 				list.map { js =>
 					reads.reads(js).fold(
 						invalid => {
-							Logger.warn(JsError.toFlatJson(invalid).toString())
+							Logger.warn(s"read Json to type [${m}] failed: ${JsError.toFlatJson(invalid).toString()}")
 							None
 						},
 						valid => Some(valid))
@@ -60,7 +60,7 @@ trait ModelQuery[T] extends MongoModel {
 		}
 	}
 
-	def findOne(objectId: Oid)(implicit exec: ExecutionContext, reads: Reads[T]): Future[Option[T]] = {
+	def findOne(objectId: Oid)(implicit exec: ExecutionContext, reads: Reads[T], m: Manifest[T]): Future[Option[T]] = {
 		find($("_id" -> objectId)).map { _.headOption }
 	}
 }
