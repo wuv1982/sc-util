@@ -45,7 +45,7 @@ case class Auth(
 	password: String,
 	token: Token,
 	avaliable: Boolean,
-	role: String) extends ModelEntity[Auth] {
+	role: Int) extends ModelEntity[Auth] {
 
 	override def collection = Auth.collection
 }
@@ -75,9 +75,9 @@ object Auth extends ModelQuery[Auth] {
 	implicit val authFmt: Format[Auth] = Json.format[Auth]
 	implicit val hisAuthFmt: Format[HisAuth] = Json.format[HisAuth]
 
-	val AUTH_ROLE_NORMAL: String = "normal"
-	val AUTH_ROLE_ANONYMOUS: String = "anonymous"
-	val AUTH_ROLE_ADMIN: String = "admin"
+	val AUTH_ROLE_NORMAL: Int = 2
+	val AUTH_ROLE_ANONYMOUS: Int = 1
+	val AUTH_ROLE_ADMIN: Int = 9
 
 	def createAnonymousUser(implicit exec: ExecutionContext): Future[Auth] = {
 		val anonymous = Auth(
@@ -165,6 +165,7 @@ object Auth extends ModelQuery[Auth] {
 
 				val jsPrune = (__ \ 'token).json.prune
 				val jsRs = jsAuth.transform(jsPrune).asOpt.getOrElse(jsAuth)
+
 				val oid = (jsAuth \ "_id" \ "$oid").as[String]
 
 				UserSession(oid).save andThen maySaveCookie apply Ok(jsRs)
@@ -180,7 +181,7 @@ object Auth extends ModelQuery[Auth] {
 				}
 			},
 			{
-				js => SessionAction.removeUserCookie(Ok(js)).withNewSession
+				_ => js => SessionAction.removeUserCookie(Ok(js)).withNewSession
 			})
 	}
 

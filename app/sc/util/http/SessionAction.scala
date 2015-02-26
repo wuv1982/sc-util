@@ -7,6 +7,7 @@ import sc.util.fmt.MessageShorter._
 import scala.concurrent.ExecutionContext.Implicits.global
 import play.api.libs.json.Json.toJsFieldJsValueWrapper
 import play.api.Logger
+import sc.models.Oid
 
 trait Anonymousable {
 	def anonymousUid: Future[Option[(UserSession, AnonymousUserCookie)]] = Future.successful(None)
@@ -16,9 +17,10 @@ trait Cookieable {
 	def findByCookie[A]: Request[A] => Future[Option[UserSession]] = request => Future.successful(None)
 }
 
-case class UserSession(uid: String) {
+case class UserSession(authId: String) {
 	def save: Result => Result = response => {
-		response.withSession(SessionAction.KEY_SESSION_OID -> uid)
+		Logger.info(s"save user session [$authId]")
+		response.withSession(SessionAction.KEY_SESSION_AUTHID -> authId)
 	}
 }
 
@@ -26,6 +28,7 @@ case class UserCookie(tokenId: String) {
 	val COOKIE_EXPIRE_10_YEAR: Option[Int] = Some(60 * 60 * 24 * 365 * 10)
 
 	def save: Result => Result = response => {
+		Logger.info(s"save user cookie [$tokenId]")
 		response.withCookies(
 			Cookie(SessionAction.KEY_COOKIE_TID, tokenId, COOKIE_EXPIRE_10_YEAR))
 	}
@@ -35,6 +38,7 @@ case class AnonymousUserCookie(tokenId: String) {
 	val COOKIE_EXPIRE_10_YEAR: Option[Int] = Some(60 * 60 * 24 * 365 * 10)
 
 	def save: Result => Result = response => {
+		Logger.info(s"save anonymous user cookie [$tokenId]")
 		response.withCookies(
 			Cookie(SessionAction.KEY_COOKIE_ANONYMOUS_TID, tokenId, COOKIE_EXPIRE_10_YEAR))
 	}
@@ -43,11 +47,12 @@ case class AnonymousUserCookie(tokenId: String) {
 case class SessionRequest[A](userSession: UserSession, request: Request[A]) extends WrappedRequest[A](request)
 
 object SessionAction {
-	val KEY_SESSION_OID: String = "oid"
-	val KEY_COOKIE_TID: String = "tid"
-	val KEY_COOKIE_ANONYMOUS_TID: String = "anonymous_tid"
+	val KEY_SESSION_AUTHID: String = "sc_authid"
+	val KEY_COOKIE_TID: String = "sc_tid"
+	val KEY_COOKIE_ANONYMOUS_TID: String = "sc_anonymous_tid"
 
 	def removeUserCookie: Result => Result = response => {
+		Logger.info(s"remove user cookie")
 		response.discardingCookies(
 			DiscardingCookie(KEY_COOKIE_TID))
 	}
@@ -68,9 +73,9 @@ trait SessionAction extends ActionBuilder[SessionRequest] {
 	private def authorize[A](
 		onSuccess: UserSession => Future[Result])(implicit request: Request[A]): Future[Result] = {
 
-		request.session.get(SessionAction.KEY_SESSION_OID).map { oid =>
-			Logger.debug(s"in session [$oid]")
-			onSuccess(UserSession(oid))
+		request.session.get(SessionAction.KEY_SESSION_AUTHID).map { authId =>
+			Logger.debug(s"in session [$authId]")
+			onSuccess(UserSession(authId))
 		}.getOrElse {
 			findByCookie(request).flatMap {
 				case Some(userSession) =>

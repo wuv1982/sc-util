@@ -33,7 +33,7 @@ class AuthActionHelper[T](
 			request.cookies.get(SessionAction.KEY_COOKIE_TID)
 				.orElse(request.cookies.get(SessionAction.KEY_COOKIE_ANONYMOUS_TID))
 				.map { tid =>
-					Auth.find(Json.toJson(Token(tid.value, true, 0))).map {
+					Auth.find(Json.obj("token" -> Token(tid.value, true, 0))).map {
 						_.headOption.map(user => UserSession(user._id.$oid))
 					}
 				}.getOrElse {

@@ -17,9 +17,11 @@ trait ActionHelper {
 
 	def sessionAction: SessionAction
 
-	private def defaultResult[T]: T => Result = {
-		case jsResult: JsValue => Ok(jsResult)
-		case _ => Ok
+	private def defaultResult[T]: Request[AnyContent] => T => Result = { implicit request =>
+		{
+			case jsResult: JsValue => Ok(jsResult)
+			case _ => Ok
+		}
 	}
 
 	def asyncJson[F](
@@ -32,15 +34,15 @@ trait ActionHelper {
 
 	def async[A, T](parser: BodyParser[A])(
 		f: Request[A] => Future[Either[String, T]],
-		r: T => Result = defaultResult): Action[A] = {
+		r: Request[A] => T => Result = defaultResult): Action[A] = {
 		Action.async(parser) { request =>
-			invokeRequest(f, r)(request)
+			invokeRequest(f, r(request))(request)
 		}
 	}
 
 	def asyncAny[T](
 		f: Request[AnyContent] => Future[Either[String, T]],
-		r: T => Result = defaultResult): Action[AnyContent] = {
+		r: Request[AnyContent] => T => Result = defaultResult): Action[AnyContent] = {
 		async(parse.anyContent)(f, r)
 	}
 
@@ -55,15 +57,15 @@ trait ActionHelper {
 
 	def asyncSession[A, T](parser: BodyParser[A])(
 		f: UserSession => Request[A] => Future[Either[String, T]],
-		r: T => Result = defaultResult): Action[A] = {
+		r: Request[A] => T => Result = defaultResult): Action[A] = {
 		sessionAction.async(parser) { sessionRequest =>
-			invokeRequest(f(sessionRequest.userSession), r)(sessionRequest.request)
+			invokeRequest(f(sessionRequest.userSession), r(sessionRequest.request))(sessionRequest.request)
 		}
 	}
 
 	def asyncSessionAny[T](
 		f: UserSession => Request[AnyContent] => Future[Either[String, T]],
-		r: T => Result = defaultResult): Action[AnyContent] = {
+		r: Request[AnyContent] => T => Result = defaultResult): Action[AnyContent] = {
 		asyncSession(parse.anyContent)(f, r)
 	}
 
