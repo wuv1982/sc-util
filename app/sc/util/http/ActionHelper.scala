@@ -17,7 +17,7 @@ trait ActionHelper {
 
 	def sessionAction: SessionAction
 
-	private def defaultResult[T]: Request[AnyContent] => T => Result = { implicit request =>
+	private def defaultResult[A, T]: Request[A] => T => Result = { implicit request =>
 		{
 			case jsResult: JsValue => Ok(jsResult)
 			case _ => Ok
