@@ -13,20 +13,31 @@ import play.api.libs.json.Reads
 import play.api.libs.json.Format
 import play.api.libs.json.JsError
 
+trait OnActionResult[A, T] extends Function2[Request[A], T, Result]
+
+object OnActionResult {
+	def apply[A, T](f: Request[A] => T => Result): OnActionResult[A, T] = {
+		new OnActionResult[A, T] {
+			override def apply(req: Request[A], arg: T) = f(req)(arg)
+		}
+	}
+}
+
 trait ActionHelper {
 
 	def sessionAction: SessionAction
 
-	private def defaultResult[A, T]: Request[A] => T => Result = { implicit request =>
-		{
-			case jsResult: JsValue => Ok(jsResult)
-			case _ => Ok
-		}
+	private def defaultResult[A, T] = OnActionResult[A, T] { request =>
+		arg =>
+			arg match {
+				case jsResult: JsValue => Ok(jsResult)
+				case _ => Ok
+			}
 	}
 
 	def asyncJson[F](
 		f: F => Request[JsValue] => Future[Either[String, JsValue]],
-		r: F => JsValue => Result = { form: F => rs: JsValue => Ok(rs) })(implicit validator: Format[F]): Action[JsValue] = {
+		r: F => OnActionResult[JsValue, JsValue] = { form: F => defaultResult[JsValue, JsValue] })(implicit validator: Format[F]): Action[JsValue] = {
 		Action.async(parse.json) { request =>
 			invokeValidateRequest(f, r)(validator)(request)
 		}
@@ -34,21 +45,21 @@ trait ActionHelper {
 
 	def async[A, T](parser: BodyParser[A])(
 		f: Request[A] => Future[Either[String, T]],
-		r: Request[A] => T => Result = defaultResult): Action[A] = {
+		r: OnActionResult[A, T] = defaultResult): Action[A] = {
 		Action.async(parser) { request =>
-			invokeRequest(f, r(request))(request)
+			invokeRequest(f, r)(request)
 		}
 	}
 
 	def asyncAny[T](
 		f: Request[AnyContent] => Future[Either[String, T]],
-		r: Request[AnyContent] => T => Result = defaultResult): Action[AnyContent] = {
+		r: OnActionResult[AnyContent, T] = defaultResult[AnyContent, T]): Action[AnyContent] = {
 		async(parse.anyContent)(f, r)
 	}
 
 	def asyncSessionJson[F](
 		f: UserSession => F => Request[JsValue] => Future[Either[String, JsValue]],
-		r: F => JsValue => Result = { form: F => rs: JsValue => Ok(rs) })(implicit validator: Format[F]): Action[JsValue] = {
+		r: F => OnActionResult[JsValue, JsValue] = { form: F => defaultResult[JsValue, JsValue] })(implicit validator: Format[F]): Action[JsValue] = {
 
 		sessionAction.async(parse.json) { sessionRequest =>
 			invokeValidateRequest(f(sessionRequest.userSession), r)(validator)(sessionRequest.request)
@@ -57,21 +68,21 @@ trait ActionHelper {
 
 	def asyncSession[A, T](parser: BodyParser[A])(
 		f: UserSession => Request[A] => Future[Either[String, T]],
-		r: Request[A] => T => Result = defaultResult): Action[A] = {
+		r: OnActionResult[A, T] = defaultResult): Action[A] = {
 		sessionAction.async(parser) { sessionRequest =>
-			invokeRequest(f(sessionRequest.userSession), r(sessionRequest.request))(sessionRequest.request)
+			invokeRequest(f(sessionRequest.userSession), r)(sessionRequest.request)
 		}
 	}
 
 	def asyncSessionAny[T](
 		f: UserSession => Request[AnyContent] => Future[Either[String, T]],
-		r: Request[AnyContent] => T => Result = defaultResult): Action[AnyContent] = {
+		r: OnActionResult[AnyContent, T] = defaultResult[AnyContent, T]): Action[AnyContent] = {
 		asyncSession(parse.anyContent)(f, r)
 	}
 
 	private def invokeRequest[A, T](
 		f: Request[A] => Future[Either[String, T]],
-		r: T => Result): Request[A] => Future[Result] = request => {
+		r: OnActionResult[A, T]): Request[A] => Future[Result] = request => {
 		f(request).map {
 			case Left(failure) => {
 				Logger.warn(s"Forbidden [403] : $failure")
@@ -83,7 +94,7 @@ trait ActionHelper {
 				} else {
 					Logger.info("Ok [200]")
 				}
-				r(success)
+				r(request, success)
 			}
 		}.recover {
 			case ex: Throwable =>
@@ -92,9 +103,9 @@ trait ActionHelper {
 		}
 	}
 
-	private def invokeValidateRequest[T](
-		f: T => Request[JsValue] => Future[Either[String, JsValue]],
-		r: T => JsValue => Result)(implicit validator: Format[T]): Request[JsValue] => Future[Result] = request => {
+	private def invokeValidateRequest[F](
+		f: F => Request[JsValue] => Future[Either[String, JsValue]],
+		r: F => OnActionResult[JsValue, JsValue])(implicit validator: Format[F]): Request[JsValue] => Future[Result] = request => {
 
 		validator.reads(request.body).fold(
 			invalid => {

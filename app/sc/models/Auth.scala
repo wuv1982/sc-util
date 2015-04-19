@@ -37,6 +37,7 @@ import sc.util.mail.EmailProvider
 import sc.util.mail.EmailTemplate
 import sc.util.security.SecurityUtil
 import sc.util.http.AuthActionHelper
+import sc.util.http.OnActionResult
 
 case class Auth(
 	_id: Oid,
@@ -152,23 +153,25 @@ object Auth extends ModelQuery[Auth] {
 					case None => Left(M("e.user.avaliable"))
 				}
 			},
-			signInForm => jsAuth => {
-				val maySaveCookie = if (signInForm.allowCookie.getOrElse(false)) {
-					(jsAuth \ "token" \ "tokenId").asOpt[String]
-						.map { tokenId =>
-							UserCookie(tokenId).save
-						}
-						.getOrElse(identity[Result] _)
-				} else {
-					identity[Result] _
+			signInForm => OnActionResult { req =>
+				jsAuth => {
+					val maySaveCookie = if (signInForm.allowCookie.getOrElse(false)) {
+						(jsAuth \ "token" \ "tokenId").asOpt[String]
+							.map { tokenId =>
+								UserCookie(tokenId).save
+							}
+							.getOrElse(identity[Result] _)
+					} else {
+						identity[Result] _
+					}
+
+					val jsPrune = (__ \ 'token).json.prune
+					val jsRs = jsAuth.transform(jsPrune).asOpt.getOrElse(jsAuth)
+
+					val oid = (jsAuth \ "_id" \ "$oid").as[String]
+
+					UserSession(oid).save andThen maySaveCookie apply Ok(jsRs)
 				}
-
-				val jsPrune = (__ \ 'token).json.prune
-				val jsRs = jsAuth.transform(jsPrune).asOpt.getOrElse(jsAuth)
-
-				val oid = (jsAuth \ "_id" \ "$oid").as[String]
-
-				UserSession(oid).save andThen maySaveCookie apply Ok(jsRs)
 			})
 	}
 
@@ -181,13 +184,13 @@ object Auth extends ModelQuery[Auth] {
 				}
 			},
 			{
-				_ => js => SessionAction.removeUserCookie(Ok(js)).withNewSession
+				OnActionResult { _ => js => SessionAction.removeUserCookie(Ok(js)).withNewSession }
 			})
 	}
 
 	def verify(actionHelper: ActionHelper)(
 		implicit exec: ExecutionContext, app: Application): Action[AnyContent] = {
-		actionHelper.asyncAny { request =>
+		actionHelper.asyncAny[JsValue] { request =>
 			request.getQueryString("tokenId").map { tokenId =>
 				find($("token.tokenId" -> tokenId)).flatMap {
 					_.headOption.map { user =>
