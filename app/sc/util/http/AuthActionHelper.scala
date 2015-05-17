@@ -15,7 +15,7 @@ class AuthActionHelper[T](
 	val appendProfile: Auth => Future[T] = { auth: Auth => Future.successful(Unit) })(
 		implicit exec: ExecutionContext) extends ActionHelper {
 
-	override def sessionAction = new SessionAction with Anonymousable with Cookieable {
+	override def sessionAction = new SessionAction with AnonymousSpec with CookieSpec {
 
 		override def anonymousUid: Future[Option[(UserSession, AnonymousUserCookie)]] = {
 			Auth.createAnonymousUser.flatMap { anonymousUser =>
@@ -30,10 +30,10 @@ class AuthActionHelper[T](
 		}
 
 		override def findByCookie[T]: Request[T] => Future[Option[UserSession]] = request => {
-			request.cookies.get(SessionAction.KEY_COOKIE_TID)
-				.orElse(request.cookies.get(SessionAction.KEY_COOKIE_ANONYMOUS_TID))
+			request.cookies.get(SessionAction.KEY_COOKIE_UUID)
+				.orElse(request.cookies.get(SessionAction.KEY_COOKIE_ANONYMOUS_UUID))
 				.map { tid =>
-					Auth.find(Json.obj("token" -> Token(tid.value, true, 0))).map {
+					Auth.find(Json.obj("token" -> Token(tid.value, "", 0))).map {
 						_.headOption.map(user => UserSession(user._id.$oid))
 					}
 				}.getOrElse {

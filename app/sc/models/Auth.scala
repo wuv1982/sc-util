@@ -41,6 +41,7 @@ import sc.util.http.OnActionResult
 
 case class Auth(
 	_id: Oid,
+	uuid: String,
 	uid: String,
 	email: Option[String],
 	password: String,
@@ -52,9 +53,9 @@ case class Auth(
 }
 
 case class Token(
-	tokenId: String = SecurityUtil.makeToken(32),
-	verified: Boolean = false,
-	expireDate: Long = System.currentTimeMillis() + Auth.DATE_EXPIRE_DURATION)
+	tokenId: String = SecurityUtil.makeRandom(32),
+	requestCode: String = SecurityUtil.makeRandom(8),
+	expireDate: Long = 0)
 
 case class HisAuth(
 	_id: Oid = Oid.newOid,
@@ -70,25 +71,25 @@ object Auth extends ModelQuery[Auth] {
 	override val collection = DBHelper.getCollection("userAuth")
 
 	lazy val hisAuth = DBHelper.getCollection("hisAuth")
-	implicit val DATE_EXPIRE_DURATION = 1000 * 60 * 60 * 3
+	implicit val DURATION_EMAIL_VERIFY_EXPIRE = 1000 * 60 * 60 * 3
 
 	implicit val tokenFmt: Format[Token] = Json.format[Token]
 	implicit val authFmt: Format[Auth] = Json.format[Auth]
 	implicit val hisAuthFmt: Format[HisAuth] = Json.format[HisAuth]
 
-	val AUTH_ROLE_NORMAL: Int = 2
-	val AUTH_ROLE_ANONYMOUS: Int = 1
-	val AUTH_ROLE_ADMIN: Int = 9
+	val AUTH_ROLE_NORMAL: Int = 500
+	val AUTH_ROLE_UNVERIFY: Int = 200
+	val AUTH_ROLE_ANONYMOUS: Int = 100
+	val AUTH_ROLE_ADMIN: Int = 900
 
 	def createAnonymousUser(implicit exec: ExecutionContext): Future[Auth] = {
 		val anonymous = Auth(
 			Oid.newOid,
-			SecurityUtil.makeToken(16),
+			SecurityUtil.makeUUID,
+			SecurityUtil.makeRandom(8),
 			None,
 			SecurityUtil.sha("anonymouspwd"),
-			Token(
-				verified = true,
-				expireDate = 0),
+			Token(),
 			true,
 			AUTH_ROLE_ANONYMOUS)
 		anonymous.save.map { _ =>
@@ -106,10 +107,12 @@ object Auth extends ModelQuery[Auth] {
 						user <- Future.successful {
 							Auth(
 								Oid.newOid,
+								SecurityUtil.makeUUID,
 								signUpForm.uid,
 								Some(signUpForm.uid),
 								SecurityUtil.sha(signUpForm.password),
-								Token(),
+								Token(
+									expireDate = System.currentTimeMillis() + Auth.DURATION_EMAIL_VERIFY_EXPIRE),
 								false,
 								AUTH_ROLE_NORMAL)
 						}
@@ -195,7 +198,7 @@ object Auth extends ModelQuery[Auth] {
 				find($("token.tokenId" -> tokenId)).flatMap {
 					_.headOption.map { user =>
 						user.copy(
-							token = Token(verified = true, expireDate = 0),
+							token = Token(),
 							avaliable = true)
 							.save
 							.map { _ => Right($("msg" -> M("i.user.verified"))) }

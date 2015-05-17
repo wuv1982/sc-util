@@ -12,13 +12,14 @@ import sc.util.fmt.MessageShorter._
 import play.api.libs.json.Reads
 import play.api.libs.json.Format
 import play.api.libs.json.JsError
+import play.mvc.Http.Response
 
 trait OnActionResult[A, T] extends Function2[Request[A], T, Result]
 
 object OnActionResult {
 	def apply[A, T](f: Request[A] => T => Result): OnActionResult[A, T] = {
 		new OnActionResult[A, T] {
-			override def apply(req: Request[A], arg: T) = f(req)(arg)
+			override def apply(req: Request[A], result: T) = f(req)(result)
 		}
 	}
 }
@@ -28,9 +29,10 @@ trait ActionHelper {
 	def sessionAction: SessionAction
 
 	private def defaultResult[A, T] = OnActionResult[A, T] { request =>
-		arg =>
-			arg match {
+		result =>
+			result match {
 				case jsResult: JsValue => Ok(jsResult)
+				case rep: Result => rep
 				case _ => Ok
 			}
 	}
