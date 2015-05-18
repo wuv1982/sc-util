@@ -17,7 +17,7 @@ class AuthActionHelper[T](
 
 	override def sessionAction = new SessionAction with AnonymousSpec with CookieSpec {
 
-		override def anonymousUid: Future[Option[(UserSession, AnonymousUserCookie)]] = {
+		override def anonymousUuid: Future[Option[(UserSession, AnonymousUserCookie)]] = {
 			Auth.createAnonymousUser.flatMap { anonymousUser =>
 				appendProfile(anonymousUser).map { _ =>
 					Some(UserSession(anonymousUser._id.$oid), AnonymousUserCookie(anonymousUser.token.tokenId))

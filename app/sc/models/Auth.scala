@@ -20,6 +20,7 @@ import play.api.mvc.AnyContent
 import play.api.mvc.Controller
 import play.api.mvc.Result
 import play.api.mvc.Results.Ok
+import play.api.mvc.Results.Redirect
 import play.api.cache.Cache
 import play.api.Application
 import play.modules.reactivemongo.MongoController
@@ -100,7 +101,7 @@ object Auth extends ModelQuery[Auth] {
 	def sighUp(actionHelper: ActionHelper)(
 		appendProfile: Auth => Future[_] = { _ => Future.successful(Unit) })(
 			implicit exec: ExecutionContext): Action[JsValue] = {
-		actionHelper.asyncJson[SignUpForm](signUpForm => request => {
+		actionHelper.asyncJson[SignUpForm, Auth](signUpForm => request => {
 			find(Json.toJson(signUpForm)).flatMap {
 				case userList if userList.isEmpty => {
 					for {
@@ -126,54 +127,68 @@ object Auth extends ModelQuery[Auth] {
 								EmailTemplate(("support@wishbank.jp", M("m.email.from")),
 									Seq(email),
 									M("m.email.subject"),
-									M("m.email.content", user.token.tokenId)))
+									M("m.email.content", user.token.tokenId, user.uuid)))
 						}.getOrElse(Future.successful(Unit))
 
-						_ <- HisAuth(authId = user._id, uid = user.uid, email = user.email)
-							.save
+						_ <- HisAuth(authId = user._id, uid = user.uid, email = user.email).save
 					} yield {
-						Right(Json.toJson(user))
+						Right(user)
 					}
 				}
 				case _ =>
 					Future.successful(Left(M("e.user.duplicated")))
 			}
-		})
+		},
+			signUpForm => OnActionResult { request =>
+				auth =>
+					signUpForm.redirect.map { redirectUrl =>
+						Redirect(redirectUrl)
+					}.getOrElse {
+						Ok(Json.toJson(auth))
+					}
+
+			})
 	}
 
 	def signIn(actionHelper: ActionHelper)(
 		implicit exec: ExecutionContext, app: Application): Action[JsValue] = {
-		actionHelper.asyncJson[SignInForm](
+		actionHelper.asyncJson[SignInForm, Auth](
 			signInForm => request => {
 				val selector = $(
 					"uid" -> signInForm.uid,
 					"password" -> SecurityUtil.sha(signInForm.password),
 					"avaliable" -> true)
-				val projection = $(
-					"password" -> 0)
-				DBHelper.query(collection)(selector, projection).map {
-					case Some(user) => Right(Json.toJson(user.head))
-					case None => Left(M("e.user.avaliable"))
+					
+				find(selector).map {
+					case Seq(user) => Right(user)
+					case _ => Left(M("e.user.avaliable"))
 				}
 			},
 			signInForm => OnActionResult { req =>
-				jsAuth => {
-					val maySaveCookie = if (signInForm.allowCookie.getOrElse(false)) {
-						(jsAuth \ "token" \ "tokenId").asOpt[String]
-							.map { tokenId =>
-								UserCookie(tokenId).save
-							}
-							.getOrElse(identity[Result] _)
-					} else {
-						identity[Result] _
+				auth => {
+					signInForm.redirect.map { redirectUrl =>
+						val queryMap = Map(
+							"id" -> Seq(auth._id.$oid),
+							"requestCode" -> Seq(auth.token.requestCode))
+
+						Redirect(redirectUrl, queryMap)
+						
+					}.getOrElse {
+
+						val maySaveCookie = if (signInForm.allowCookie.getOrElse(false)) {
+							UserCookie(auth.uuid).save
+						} else {
+							identity[Result] _
+						}
+
+						val jsAuth = Json.toJson(auth)
+						
+						val pruneToken = (__ \ 'token).json.prune
+						val prunePassword = (__ \ 'password).json.prune
+						val jsRs = jsAuth.transform(pruneToken andThen prunePassword).asOpt.getOrElse(jsAuth)
+
+						UserSession(auth.uuid).save andThen maySaveCookie apply Ok(jsRs)
 					}
-
-					val jsPrune = (__ \ 'token).json.prune
-					val jsRs = jsAuth.transform(jsPrune).asOpt.getOrElse(jsAuth)
-
-					val oid = (jsAuth \ "_id" \ "$oid").as[String]
-
-					UserSession(oid).save andThen maySaveCookie apply Ok(jsRs)
 				}
 			})
 	}
@@ -194,18 +209,28 @@ object Auth extends ModelQuery[Auth] {
 	def verify(actionHelper: ActionHelper)(
 		implicit exec: ExecutionContext, app: Application): Action[AnyContent] = {
 		actionHelper.asyncAny[JsValue] { request =>
-			request.getQueryString("tokenId").map { tokenId =>
-				find($("token.tokenId" -> tokenId)).flatMap {
-					_.headOption.map { user =>
-						user.copy(
-							token = Token(),
-							avaliable = true)
-							.save
-							.map { _ => Right($("msg" -> M("i.user.verified"))) }
+			(for {
+				uuid <- request.getQueryString("uuid")
+				token <- request.getQueryString("token")
+			} yield {
+				val now = System.currentTimeMillis()
 
-					}.getOrElse(Future.successful(Left(M("e.user.avaliable"))))
-				}
-			}.getOrElse(Future.successful(Left(M("e.user.verified"))))
+				find($("token.tokenId" -> token,
+					"uuid" -> uuid,
+					"token.expireDate" -> $("$lt" -> now)))
+					.flatMap {
+						case Seq(user) =>
+							user.copy(
+								token = Token(),
+								avaliable = true)
+								.save
+								.map { _ => Right($("msg" -> M("i.user.verified"))) }
+
+						case _ => Future.successful(Left(M("e.user.avaliable")))
+					}
+			}).getOrElse {
+				Future.successful(Left(M("e.user.verified")))
+			}
 		}
 	}
 

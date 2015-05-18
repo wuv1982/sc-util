@@ -10,7 +10,7 @@ import play.api.Logger
 import sc.models.Oid
 
 trait AnonymousSpec {
-	def anonymousUid: Future[Option[(UserSession, AnonymousUserCookie)]] = Future.successful(None)
+	def anonymousUuid: Future[Option[(UserSession, AnonymousUserCookie)]] = Future.successful(None)
 }
 
 trait CookieSpec {
@@ -73,9 +73,9 @@ trait SessionAction extends ActionBuilder[SessionRequest] {
 	private def authorize[A](
 		onSuccess: UserSession => Future[Result])(implicit request: Request[A]): Future[Result] = {
 
-		request.session.get(SessionAction.KEY_SESSION_UUID).map { authId =>
-			Logger.debug(s"in session [$authId]")
-			onSuccess(UserSession(authId))
+		request.session.get(SessionAction.KEY_SESSION_UUID).map { uuid =>
+			Logger.debug(s"in session [$uuid]")
+			onSuccess(UserSession(uuid))
 		}.getOrElse {
 			findByCookie(request).flatMap {
 				case Some(userSession) =>
@@ -84,7 +84,7 @@ trait SessionAction extends ActionBuilder[SessionRequest] {
 						.map(userSession.save)
 				case None =>
 					Logger.debug(s"not found by cookied.")
-					anonymousUid.flatMap {
+					anonymousUuid.flatMap {
 						case Some((userSession, userCookie)) =>
 							Logger.info("create anonymous user")
 							onSuccess(userSession)

@@ -37,9 +37,9 @@ trait ActionHelper {
 			}
 	}
 
-	def asyncJson[F](
-		f: F => Request[JsValue] => Future[Either[String, JsValue]],
-		r: F => OnActionResult[JsValue, JsValue] = { form: F => defaultResult[JsValue, JsValue] })(implicit validator: Format[F]): Action[JsValue] = {
+	def asyncJson[F, T](
+		f: F => Request[JsValue] => Future[Either[String, T]],
+		r: F => OnActionResult[JsValue, T] = { form: F => defaultResult[JsValue, T] })(implicit validator: Format[F]): Action[JsValue] = {
 		Action.async(parse.json) { request =>
 			invokeValidateRequest(f, r)(validator)(request)
 		}
@@ -59,9 +59,9 @@ trait ActionHelper {
 		async(parse.anyContent)(f, r)
 	}
 
-	def asyncSessionJson[F](
-		f: UserSession => F => Request[JsValue] => Future[Either[String, JsValue]],
-		r: F => OnActionResult[JsValue, JsValue] = { form: F => defaultResult[JsValue, JsValue] })(implicit validator: Format[F]): Action[JsValue] = {
+	def asyncSessionJson[F, T](
+		f: UserSession => F => Request[JsValue] => Future[Either[String, T]],
+		r: F => OnActionResult[JsValue, T] = { form: F => defaultResult[JsValue, T] })(implicit validator: Format[F]): Action[JsValue] = {
 
 		sessionAction.async(parse.json) { sessionRequest =>
 			invokeValidateRequest(f(sessionRequest.userSession), r)(validator)(sessionRequest.request)
@@ -105,9 +105,9 @@ trait ActionHelper {
 		}
 	}
 
-	private def invokeValidateRequest[F](
-		f: F => Request[JsValue] => Future[Either[String, JsValue]],
-		r: F => OnActionResult[JsValue, JsValue])(implicit validator: Format[F]): Request[JsValue] => Future[Result] = request => {
+	private def invokeValidateRequest[F, T](
+		f: F => Request[JsValue] => Future[Either[String, T]],
+		r: F => OnActionResult[JsValue, T])(implicit validator: Format[F]): Request[JsValue] => Future[Result] = request => {
 
 		validator.reads(request.body).fold(
 			invalid => {
