@@ -18,27 +18,25 @@ case class EmailTemplate(
 	}
 }
 
-object EmailProvider {
+case class EmailConf(
+	host: String,
+	port: Int,
+	uid: String,
+	passwd: String,
+	charset: String = "utf-8")
 
-	private[this] object Emailconf {
-		val conf = ConfigFactory.load()
-		val host = conf.getString("mail.smtp.host")
-		val port = conf.getInt("mail.smtp.port")
-		val uid = conf.getString("mail.smtp.uid")
-		val passwd = conf.getString("mail.smtp.passwd")
-		val CHARSET: String = "utf-8"
-	}
+case class EmailProvider(conf: EmailConf) {
 
 	def send(email: EmailTemplate)(implicit executionCtx: ExecutionContext): Future[Unit] = {
 
 		Future {
 			val e = new HtmlEmail()
-			e.setHostName(Emailconf.host)
-			e.setSmtpPort(Emailconf.port)
-			e.setCharset(Emailconf.CHARSET)
+			e.setHostName(conf.host)
+			e.setSmtpPort(conf.port)
+			e.setCharset(conf.charset)
 
 			e.setSSLOnConnect(true)
-			e.setAuthentication(Emailconf.uid, Emailconf.passwd)
+			e.setAuthentication(conf.uid, conf.passwd)
 			e.setFrom(email.from._1, email.from._2)
 
 			e.addTo(email.to: _*)
@@ -55,3 +53,12 @@ object EmailProvider {
 		}
 	}
 }
+
+object EmailProvider extends EmailProvider({
+	val conf = ConfigFactory.load()
+	val host = conf.getString("mail.smtp.host")
+	val port = conf.getInt("mail.smtp.port")
+	val uid = conf.getString("mail.smtp.uid")
+	val passwd = conf.getString("mail.smtp.passwd")
+	EmailConf(host, port, uid, passwd)
+})

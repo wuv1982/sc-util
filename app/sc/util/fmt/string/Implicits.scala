@@ -4,6 +4,8 @@ import play.api.Logger
 import scala.Left
 import scala.Right
 
+case class StringParseException(msg:String) extends Exception
+
 object Implicits {
 
 	implicit class StringParserable(str: String) {
@@ -11,7 +13,7 @@ object Implicits {
 		def asOpt[T](implicit parser: Parser[T]): Option[T] = {
 			parser.parse(str).fold(
 				invalid => {
-					Logger.warn(s"convert failed on $str to Int", invalid)
+					Logger.warn(s"failed on $str parse", invalid)
 					None
 				},
 				valid => Some(valid))
@@ -19,15 +21,25 @@ object Implicits {
 	}
 
 	trait Parser[A] {
-		def parse(input: String): Either[Exception, A]
+		def parse(input: String): Either[StringParseException, A]
 	}
 
 	implicit object IntParser extends Parser[Int] {
-		override def parse(input: String): Either[Exception, Int] = {
+		override def parse(input: String): Either[StringParseException, Int] = {
 			try {
 				Right(Integer.parseInt(input))
 			} catch {
-				case ex: NumberFormatException => Left(ex)
+				case ex: NumberFormatException => Left(StringParseException(s"${this.getClass} failed on $input"))
+			}
+		}
+	}
+
+	implicit object BooleanParser extends Parser[Boolean] {
+		override def parse(input: String): Either[StringParseException, Boolean] = {
+			input match {
+				case "true" => Right(true)
+				case "false" => Right(false)
+				case _ => Left(StringParseException(s"${this.getClass} failed on $input"))
 			}
 		}
 	}

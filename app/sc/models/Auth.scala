@@ -158,21 +158,23 @@ object Auth extends ModelQuery[Auth] {
 					"uid" -> signInForm.uid,
 					"password" -> SecurityUtil.sha(signInForm.password),
 					"avaliable" -> true)
-					
+
 				find(selector).map {
 					case Seq(user) => Right(user)
 					case _ => Left(M("e.user.avaliable"))
 				}
 			},
+
 			signInForm => OnActionResult { req =>
 				auth => {
 					signInForm.redirect.map { redirectUrl =>
 						val queryMap = Map(
 							"id" -> Seq(auth._id.$oid),
-							"requestCode" -> Seq(auth.token.requestCode))
+							"requestCode" -> Seq(auth.token.requestCode),
+							"allowCookie" -> Seq(signInForm.allowCookie.map(_.toString).getOrElse("false")))
 
 						Redirect(redirectUrl, queryMap)
-						
+
 					}.getOrElse {
 
 						val maySaveCookie = if (signInForm.allowCookie.getOrElse(false)) {
@@ -182,7 +184,7 @@ object Auth extends ModelQuery[Auth] {
 						}
 
 						val jsAuth = Json.toJson(auth)
-						
+
 						val pruneToken = (__ \ 'token).json.prune
 						val prunePassword = (__ \ 'password).json.prune
 						val jsRs = jsAuth.transform(pruneToken andThen prunePassword).asOpt.getOrElse(jsAuth)
@@ -208,16 +210,14 @@ object Auth extends ModelQuery[Auth] {
 
 	def verify(actionHelper: ActionHelper)(
 		implicit exec: ExecutionContext, app: Application): Action[AnyContent] = {
-		actionHelper.asyncAny[JsValue] { request =>
+		actionHelper.asyncAny[JsValue](request => {
 			(for {
 				uuid <- request.getQueryString("uuid")
 				token <- request.getQueryString("token")
 			} yield {
-				val now = System.currentTimeMillis()
-
-				find($("token.tokenId" -> token,
-					"uuid" -> uuid,
-					"token.expireDate" -> $("$lt" -> now)))
+				find($("uuid" -> uuid,
+					"token.tokenId" -> token,
+					"token.expireDate" -> $("$lt" -> System.currentTimeMillis())))
 					.flatMap {
 						case Seq(user) =>
 							user.copy(
@@ -231,7 +231,14 @@ object Auth extends ModelQuery[Auth] {
 			}).getOrElse {
 				Future.successful(Left(M("e.user.verified")))
 			}
-		}
+		},
+			OnActionResult { request => msg =>
+				Ok("/verify/success")
+				
+			},
+			OnActionResult { request => error =>
+				Ok("/verify/failed")
+			})
 	}
 
 }
