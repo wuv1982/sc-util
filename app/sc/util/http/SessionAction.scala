@@ -10,11 +10,19 @@ import play.api.Logger
 import sc.models.Oid
 
 trait AnonymousSpec {
-	def anonymousUuid: Future[Option[(UserSession, AnonymousUserCookie)]] = Future.successful(None)
+	def anonymousUuid: Future[Option[(UserSession, AnonymousUserCookie)]]
+}
+
+trait UnableAnonymous extends AnonymousSpec{
+	override def anonymousUuid: Future[Option[(UserSession, AnonymousUserCookie)]] = Future.successful(None)
 }
 
 trait CookieSpec {
-	def findByCookie[A]: Request[A] => Future[Option[UserSession]] = request => Future.successful(None)
+	def findByCookie[A]: Request[A] => Future[Option[UserSession]]
+}
+
+trait UnableCookie extends CookieSpec{
+	override def findByCookie[A]: Request[A] => Future[Option[UserSession]] = request => Future.successful(None)
 }
 
 case class UserSession(uuid: String) {

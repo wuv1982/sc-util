@@ -41,9 +41,9 @@ import sc.util.http.AuthActionHelper
 import sc.util.http.OnActionResult
 
 case class Auth(
-	_id: Oid,
-	uuid: String,
-	uid: String,
+	_id: Oid, // sequenced index id
+	uuid: String, // unreadable index id
+	uid: String, // readable index id
 	email: Option[String],
 	password: String,
 	token: Token,
