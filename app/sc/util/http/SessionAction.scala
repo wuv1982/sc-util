@@ -13,7 +13,7 @@ trait AnonymousSpec {
 	def anonymousUuid: Future[Option[(UserSession, AnonymousUserCookie)]]
 }
 
-trait UnableAnonymous extends AnonymousSpec{
+trait UnableAnonymous extends AnonymousSpec {
 	override def anonymousUuid: Future[Option[(UserSession, AnonymousUserCookie)]] = Future.successful(None)
 }
 
@@ -21,7 +21,7 @@ trait CookieSpec {
 	def findByCookie[A]: Request[A] => Future[Option[UserSession]]
 }
 
-trait UnableCookie extends CookieSpec{
+trait UnableCookie extends CookieSpec {
 	override def findByCookie[A]: Request[A] => Future[Option[UserSession]] = request => Future.successful(None)
 }
 
@@ -102,6 +102,10 @@ trait SessionAction extends ActionBuilder[SessionRequest] {
 							onUnauthorized(request)
 						}
 					}
+			}.recover {
+				case ex =>
+					Logger.error("internal error", ex)
+					Results.InternalServerError("internal error")
 			}
 		}
 	}

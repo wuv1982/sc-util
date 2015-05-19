@@ -15,7 +15,7 @@ class AuthActionHelper[T](
 	val appendProfile: Auth => Future[T] = { auth: Auth => Future.successful(Unit) })(
 		implicit exec: ExecutionContext) extends ActionHelper {
 
-	override def sessionAction = new SessionAction with AnonymousSpec with CookieSpec {
+	override val sessionAction = new SessionAction with AnonymousSpec with CookieSpec {
 
 		override def anonymousUuid: Future[Option[(UserSession, AnonymousUserCookie)]] = {
 			Auth.createAnonymousUser.flatMap { anonymousUser =>

@@ -27,14 +27,14 @@ object OnActionResult {
 
 trait ActionHelper {
 
-	def sessionAction: SessionAction
+	val sessionAction: SessionAction
 
 	private def errorResult[A]: OnActionResult[A, (Int, String)] = OnActionResult[A, (Int, String)] { request =>
 		{
-			case (403, error) => Forbidden(Json.obj("msg" -> error)) 
-			case (401, error) => BadRequest(Json.obj("msg" -> error)) 
-			case (500, error) => InternalServerError(Json.obj("msg" -> error)) 
-			case _ => InternalServerError(Json.obj("msg" -> "unknown error")) 
+			case (403, error) => Forbidden(Json.obj("msg" -> error))
+			case (401, error) => BadRequest(Json.obj("msg" -> error))
+			case (500, error) => InternalServerError(Json.obj("msg" -> error))
+			case _ => InternalServerError(Json.obj("msg" -> "unknown error"))
 		}
 	}
 
@@ -118,7 +118,7 @@ trait ActionHelper {
 		}.recover {
 			case ex: Throwable =>
 				Logger.error("System Error [500]", ex)
-				e(request, (500,  M("e.system")))
+				e(request, (500, M("e.system")))
 		}
 	}
 
