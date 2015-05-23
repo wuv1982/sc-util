@@ -39,6 +39,7 @@ import sc.util.mail.EmailTemplate
 import sc.util.security.SecurityUtil
 import sc.util.http.AuthActionHelper
 import sc.util.http.OnActionResult
+import com.typesafe.config.ConfigFactory
 
 case class Auth(
 	_id: Oid, // sequenced index id
@@ -72,7 +73,7 @@ object Auth extends ModelQuery[Auth] {
 	override val collection = DBHelper.getCollection("userAuth")
 
 	lazy val hisAuth = DBHelper.getCollection("hisAuth")
-	implicit val DURATION_EMAIL_VERIFY_EXPIRE = 1000 * 60 * 60 * 3
+	implicit val DURATION_EMAIL_VERIFY_EXPIRE = 1000 * 60 * 60 * 24 * 3
 
 	implicit val tokenFmt: Format[Token] = Json.format[Token]
 	implicit val authFmt: Format[Auth] = Json.format[Auth]
@@ -102,7 +103,7 @@ object Auth extends ModelQuery[Auth] {
 		appendProfile: Auth => Future[_] = { _ => Future.successful(Unit) })(
 			implicit exec: ExecutionContext): Action[JsValue] = {
 		actionHelper.asyncJson[SignUpForm, Auth](signUpForm => request => {
-			find(Json.toJson(signUpForm)).flatMap {
+			find(Json.toJson(signUpForm.copy(redirect = None))).flatMap {
 				case userList if userList.isEmpty => {
 					for {
 						user <- Future.successful {
@@ -123,11 +124,14 @@ object Auth extends ModelQuery[Auth] {
 						_ <- appendProfile(user)
 
 						_ <- user.email.map { email =>
+							val conf = ConfigFactory.load()
+							val host = conf.getString("auth.host")
+
 							EmailProvider.send(
 								EmailTemplate(("support@wishbank.jp", M("m.email.from")),
 									Seq(email),
 									M("m.email.subject"),
-									M("m.email.content", user.token.tokenId, user.uuid)))
+									M("m.email.content", user.token.tokenId, user.uuid, host)))
 						}.getOrElse(Future.successful(Unit))
 
 						_ <- HisAuth(authId = user._id, uid = user.uid, email = user.email).save
@@ -142,9 +146,10 @@ object Auth extends ModelQuery[Auth] {
 			signUpForm => OnActionResult { request =>
 				auth =>
 					signUpForm.redirect.map { redirectUrl =>
-						Redirect(redirectUrl)
+						Logger.info(s"redirect : $redirectUrl")
+						Ok($("redirectUrl" -> redirectUrl))
 					}.getOrElse {
-						Ok(Json.toJson(auth))
+						Ok
 					}
 
 			})
@@ -168,12 +173,9 @@ object Auth extends ModelQuery[Auth] {
 			signInForm => OnActionResult { req =>
 				auth => {
 					signInForm.redirect.map { redirectUrl =>
-						val queryMap = Map(
-							"id" -> Seq(auth._id.$oid),
-							"requestCode" -> Seq(auth.token.requestCode),
-							"allowCookie" -> Seq(signInForm.allowCookie.map(_.toString).getOrElse("false")))
-
-						Redirect(redirectUrl, queryMap)
+						val callbackUrl = s"$redirectUrl?id=${auth._id.$oid}&requestCode=${auth.token.requestCode}&allowCookie=${signInForm.allowCookie.getOrElse(false)}"
+						Logger.debug(s"callbackUrl = $callbackUrl")
+						Ok($("redirectUrl" -> callbackUrl))
 
 					}.getOrElse {
 
@@ -213,31 +215,33 @@ object Auth extends ModelQuery[Auth] {
 		actionHelper.asyncAny[JsValue](request => {
 			(for {
 				uuid <- request.getQueryString("uuid")
-				token <- request.getQueryString("token")
+				tokenId <- request.getQueryString("tokenId")
 			} yield {
 				find($("uuid" -> uuid,
-					"token.tokenId" -> token,
-					"token.expireDate" -> $("$lt" -> System.currentTimeMillis())))
+					"token.tokenId" -> tokenId,
+					"token.expireDate" -> $("$gt" -> System.currentTimeMillis())))
 					.flatMap {
 						case Seq(user) =>
 							user.copy(
 								token = Token(),
 								avaliable = true)
 								.save
-								.map { _ => Right($("msg" -> M("i.user.verified"))) }
+								.map { _ => Right($("msg" -> M("i.user.verify"))) }
 
 						case _ => Future.successful(Left(M("e.user.avaliable")))
 					}
 			}).getOrElse {
-				Future.successful(Left(M("e.user.verified")))
+				Future.successful(Left(M("e.user.verify")))
 			}
 		},
-			OnActionResult { request => msg =>
-				Ok("/verify/success")
-				
+			OnActionResult { request =>
+				msg =>
+					Ok("/verify/success")
+
 			},
-			OnActionResult { request => error =>
-				Ok("/verify/failed")
+			OnActionResult { request =>
+				error =>
+					Ok("/verify/failed")
 			})
 	}
 

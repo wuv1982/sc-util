@@ -27,7 +27,7 @@ trait UnableCookie extends CookieSpec {
 
 case class UserSession(uuid: String) {
 	def save: Result => Result = response => {
-		Logger.info(s"save user session [uuid]")
+		Logger.info(s"save user session [$uuid]")
 		response.withSession(SessionAction.KEY_SESSION_UUID -> uuid)
 	}
 }
@@ -36,7 +36,7 @@ case class UserCookie(uuid: String) {
 	val COOKIE_EXPIRE_10_YEAR: Option[Int] = Some(60 * 60 * 24 * 365 * 10)
 
 	def save: Result => Result = response => {
-		Logger.info(s"save user cookie [uuid]")
+		Logger.info(s"save user cookie [$uuid]")
 		response.withCookies(
 			Cookie(SessionAction.KEY_COOKIE_UUID, uuid, COOKIE_EXPIRE_10_YEAR))
 	}
@@ -46,7 +46,7 @@ case class AnonymousUserCookie(uuid: String) {
 	val COOKIE_EXPIRE_10_YEAR: Option[Int] = Some(60 * 60 * 24 * 365 * 10)
 
 	def save: Result => Result = response => {
-		Logger.info(s"save anonymous user cookie [uuid]")
+		Logger.info(s"save anonymous user cookie [$uuid]")
 		response.withCookies(
 			Cookie(SessionAction.KEY_COOKIE_ANONYMOUS_UUID, uuid, COOKIE_EXPIRE_10_YEAR))
 	}
@@ -57,7 +57,7 @@ case class SessionRequest[A](userSession: UserSession, request: Request[A]) exte
 object SessionAction {
 	val KEY_SESSION_UUID: String = "sc_sid"
 	val KEY_COOKIE_UUID: String = "sc_cid"
-	val KEY_COOKIE_ANONYMOUS_UUID: String = "sc_anonymous_cid"
+	val KEY_COOKIE_ANONYMOUS_UUID: String = "sc_anonymous_aid"
 
 	def removeUserCookie: Result => Result = response => {
 		Logger.info(s"remove user cookie")
@@ -70,6 +70,7 @@ trait SessionAction extends ActionBuilder[SessionRequest] {
 	self: AnonymousSpec with CookieSpec =>
 
 	override def invokeBlock[A](request: Request[A], block: (SessionRequest[A]) => Future[Result]) = {
+		Logger.debug(s"[${request.method}] ${request.uri}")
 		authorize(
 			onSuccess = userSession => block(SessionRequest(userSession, request)))(request)
 	}
